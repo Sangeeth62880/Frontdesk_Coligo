@@ -2,6 +2,7 @@ services:
   - type: web
     name: frontdesk
     runtime: docker
+    region: singapore
     plan: free
     healthCheckPath: /health
     envVars:
@@ -21,6 +22,8 @@ services:
         value: "true"
 databases:
   - name: frontdesk-db
+    region: singapore
+    postgresMajorVersion: "17"
     databaseName: frontdesk
     user: frontdesk_owner
     plan: free
