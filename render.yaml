@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: frontdesk
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: frontdesk-db
+          property: connectionString
+      - key: FRONTDESK_DB_PASSWORD
+        generateValue: true
+      - key: FRONTDESK_AGENT_TOKEN
+        generateValue: true
+      - key: FRONTDESK_SWEEP_TOKEN
+        generateValue: true
+      - key: FRONTDESK_SWEEP_INTERVAL_SECONDS
+        value: "60"
+      - key: FRONTDESK_SEED_DEMO
+        value: "true"
+databases:
+  - name: frontdesk-db
+    databaseName: frontdesk
+    user: frontdesk_owner
+    plan: free
+    ipAllowList: []

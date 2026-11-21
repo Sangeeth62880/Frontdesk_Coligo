@@ -1,0 +1,31 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: frontdesk
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: frontdesk_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U frontdesk -d frontdesk_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://frontdesk:test-only-password@localhost:5432/frontdesk_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.1"
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check frontdesk/static/app.js
+      - run: node --check frontdesk/static/customer.js
