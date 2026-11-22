@@ -255,7 +255,7 @@ This is a coverage-style requirement map, not a claim of measured line or branch
 | Raw passwords/tokens absent from all-column database dump, logs, other responses and errors | `test_secrets_absent_from_dump_logs_errors_and_other_responses` |
 | Per-password salts; stdin provisioning revokes old sessions | `test_password_salt_compare_and_provisioning` |
 | Demo hint and three passwords only in enabled demo mode; no default | `test_demo_credentials_only_when_enabled` |
-| Restricted runtime can log in, mutate tickets and revoke; cannot update/delete/truncate events or change passwords | `test_restricted_runtime_can_authenticate_but_cannot_edit_audit` |
+| Restricted runtime can log in, mutate tickets and revoke; cannot update/delete/truncate events or change passwords; repeated provisioning works under a non-superuser database owner | `test_restricted_runtime_can_authenticate_but_cannot_edit_audit`, `test_repeated_provisioning_with_non_superuser_owner` |
 | Sign-in, generic errors, 429, signed-in identity, logout and API 401 cleanup | `test_login_ui_session_lifecycle` executes shipped JavaScript handlers |
 | Full scripted steps 1–13, customer privacy, timeline and late-first HTML | `test_frontdesk_end_to_end` |
 

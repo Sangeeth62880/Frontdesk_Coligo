@@ -279,3 +279,38 @@ def test_concurrent_failed_logins_share_one_database_counter(auth_harness, caplo
         assert db.execute('SELECT count(*) FROM events').fetchone()[0] == 0
     outcomes = [json.loads(r.message)['outcome'] for r in caplog.records if r.name == 'frontdesk.auth']
     assert sorted(outcomes) == ['failed']*5 + ['throttled']
+
+
+def test_repeated_provisioning_with_non_superuser_owner(api_db):
+    """Model Render's CREATEROLE owner, including the second deployment."""
+    from psycopg.conninfo import make_conninfo
+    from scripts.provision_runtime import provision
+    owner = 'bootstrap_test_'+uuid4().hex
+    role = 'runtime_test_'+uuid4().hex
+    try:
+        with psycopg.connect(api_db) as db:
+            original, database, schema = db.execute('SELECT current_user,current_database(),current_schema()').fetchone()
+            db.execute(sql.SQL('CREATE ROLE {} LOGIN CREATEROLE PASSWORD {}').format(sql.Identifier(owner), sql.Literal('bootstrap-test-password')))
+            db.execute(sql.SQL('GRANT CONNECT, CREATE ON DATABASE {} TO {} WITH GRANT OPTION').format(sql.Identifier(database), sql.Identifier(owner)))
+            db.execute(sql.SQL('ALTER SCHEMA {} OWNER TO {}').format(sql.Identifier(schema), sql.Identifier(owner)))
+            for (table,) in db.execute('SELECT tablename FROM pg_tables WHERE schemaname=current_schema()').fetchall():
+                db.execute(sql.SQL('ALTER TABLE {} OWNER TO {}').format(sql.Identifier(table), sql.Identifier(owner)))
+        owner_url = make_conninfo(api_db, user=owner, password='bootstrap-test-password')
+        provision(owner_url, 'runtime-test-password', role=role)
+        runtime_url = provision(owner_url, 'runtime-test-password', role=role)
+        with psycopg.connect(runtime_url) as db:
+            assert db.execute('SELECT rolsuper,rolcreatedb,rolcreaterole,rolinherit FROM pg_roles WHERE rolname=current_user').fetchone() == (False,False,False,False)
+            assert db.execute("SELECT has_table_privilege(current_user,'events','UPDATE'),has_table_privilege(current_user,'events','DELETE')").fetchone() == (False,False)
+            db.execute('SELECT count(*) FROM agents')
+    finally:
+        with psycopg.connect(api_db, autocommit=True) as db:
+            if db.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (owner,)).fetchone():
+                if db.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)).fetchone():
+                    db.execute(sql.SQL('SET ROLE {}').format(sql.Identifier(owner)))
+                    db.execute(sql.SQL('REVOKE CONNECT ON DATABASE {} FROM {} CASCADE').format(sql.Identifier(database), sql.Identifier(role)))
+                    db.execute('RESET ROLE')
+                db.execute(sql.SQL('REASSIGN OWNED BY {} TO {}').format(sql.Identifier(owner), sql.Identifier(original)))
+            for name in [role, owner]:
+                if db.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (name,)).fetchone():
+                    db.execute(sql.SQL('DROP OWNED BY {}').format(sql.Identifier(name)))
+                    db.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(name)))

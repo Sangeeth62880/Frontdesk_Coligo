@@ -10,8 +10,12 @@ def provision(admin_url, password, role='frontdesk_app'):
     if not password:
         raise ValueError('A non-empty runtime database password is required')
     with psycopg.connect(admin_url) as db:
-        exists = db.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)).fetchone()
-        statement = 'ALTER ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}' if exists else 'CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}'
+        exists = db.execute('SELECT rolsuper, rolcreatedb, rolcreaterole, rolreplication, rolbypassrls FROM pg_roles WHERE rolname=%s', (role,)).fetchone()
+        if exists and any(exists):
+            raise ValueError('Existing runtime role must not have elevated privileges')
+        # Managed PostgreSQL owners cannot ALTER the SUPERUSER attribute, even
+        # to false. Validate privileged attributes above and preserve them on repeat boots.
+        statement = 'ALTER ROLE {} WITH LOGIN NOINHERIT PASSWORD {}' if exists else 'CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}'
         db.execute(sql.SQL(statement).format(sql.Identifier(role), sql.Literal(password)))
         name = db.execute('SELECT current_database()').fetchone()[0]
         db.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(sql.Identifier(name), sql.Identifier(role)))
