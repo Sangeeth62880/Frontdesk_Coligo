@@ -196,9 +196,15 @@ def test_browser_wrong_password_lockout_and_expired_401(browser,browser_stack):
             page.get_by_role('button',name='Sign in',exact=True).click()
         assert response.value.status==401
         expect(page.locator('#login-error')).to_have_text('Unable to sign in. Check your email and password.')
+        # The response precedes the submit handler's finally block. Do not let
+        # that block clear the next attempt's freshly filled password.
+        expect(page.get_by_role('button',name='Sign in',exact=True)).to_be_enabled()
+        expect(page.locator('#login-password')).to_have_value('')
     page.locator('#login-password').fill(TEST_PASSWORD)
     page.get_by_role('button',name='Sign in',exact=True).click()
     expect(page.locator('#login-error')).to_contain_text('Too many')
+    expect(page.get_by_role('button',name='Sign in',exact=True)).to_be_enabled()
+    expect(page.locator('#login-password')).to_have_value('')
     auth_clock[0]+=timedelta(minutes=10)
     page.locator('#login-password').fill(TEST_PASSWORD)
     page.get_by_role('button',name='Sign in',exact=True).click()
