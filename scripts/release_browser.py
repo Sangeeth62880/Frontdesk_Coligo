@@ -3,13 +3,14 @@ import html
 import json
 import re
 import sys
+import time
 import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import requests
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import Page, Request, expect, sync_playwright
 
 BASE = 'https://frontdesk-spfe.onrender.com'
 OUT = Path('output/release')
@@ -33,22 +34,46 @@ def main():
         browser = p.chromium.launch()
         a, b = browser.new_context(accept_downloads=True), browser.new_context()
         one, two = a.new_page(), b.new_page()
+        inflight: dict[Page, set[Request]] = {one: set(), two: set()}
+        progress = {'phase': 'setup'}
+        def stage(name):
+            progress['phase'] = name
+            print('Browser stage: '+name, flush=True)
+        def settle(page):
+            deadline = time.monotonic()+30
+            while True:
+                page.wait_for_timeout(100)
+                refreshing = page.evaluate("typeof refreshing !== 'undefined' && (refreshing || refreshAgain)")
+                if not inflight.get(page) and not refreshing:
+                    return
+                assert time.monotonic() < deadline, 'Active requests did not settle'
         def navigate(page, url):
             # Explicit test navigation must not cancel the app's current refresh.
-            page.wait_for_load_state('networkidle')
+            settle(page)
             page.goto(url)
-            page.wait_for_load_state('networkidle')
+            settle(page)
+        def track(page: Page):
+            def started(request: Request):
+                inflight[page].add(request)
+            def finished(request: Request):
+                inflight[page].discard(request)
+            def request_failed(request: Request):
+                inflight[page].discard(request)
+                failed.append(f'{progress["phase"]}: {request.url.split("?")[0]}: {request.failure}')
+            page.on('request', started)
+            page.on('requestfinished', finished)
+            page.on('requestfailed', request_failed)
         for page in (one, two):
             page.set_default_timeout(30000)
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.on('requestfailed', lambda request: failed.append(f'{request.url.split("?")[0]}: {request.failure}'))
+            track(page)
         def axe(page, name):
             page.evaluate(Path('node_modules/axe-core/axe.min.js').read_text())
             violations = page.evaluate("async()=> (await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact}))")
             result['axe'][name] = violations
             assert not violations, (name, violations)
         def login(page, email):
-            print('Browser stage: sign in', flush=True)
+            stage('sign in')
             navigate(page, BASE)
             page.locator('#login-email').fill(email)
             page.locator('#login-password').fill(password)
@@ -60,7 +85,7 @@ def main():
         token = login(one, 'meera@arvo.example')
         login(two, 'arun@arvo.example')
         headers = {'Authorization': 'Bearer '+token}
-        print('Browser stage: create and claim', flush=True)
+        stage('create and claim')
         one.get_by_role('button', name='New ticket', exact=True).click()
         one.locator('[name=subject]').fill(label+' '+payload)
         one.locator('[name=customer_email]').fill('release-verification@arvo.example')
@@ -85,7 +110,7 @@ def main():
         assert access.status == 200
         capability = access.json()['customer_token']
         result['checks'].extend(['UI create', 'two-context claim conflict', 'list/detail capability absence', 'assignee-only customer access'])
-        print('Browser stage: agent conversation', flush=True)
+        stage('agent conversation')
         one.get_by_role('button', name='Internal note', exact=True).click()
         expect(one.locator('#reply-form')).to_have_class('composer internal')
         one.locator('#reply-body').fill('RELEASE_PRIVATE_NOTE_'+stamp)
@@ -106,7 +131,7 @@ def main():
         axe(one, 'ticket')
         result['checks'].extend(['public/internal visuals', 'inert subject/body XSS', 'waiting public question', 'priority timeline snapshot'])
         customer = a.new_page()
-        print('Browser stage: customer conversation', flush=True)
+        stage('customer conversation')
         customer.on('pageerror', lambda error: errors.append(str(error)))
         navigate(customer, BASE+f'/customer#{ticket_id}:{capability}')
         expect(customer.locator('h2')).to_contain_text(label)
@@ -135,7 +160,7 @@ def main():
         expect(one.locator('.detail-customer')).to_contain_text('Cycle 2')
         result['checks'].extend(['customer note privacy', 'customer answer resumes', 'native CSV download', 'simulated answer', 'resolve/reopen'])
         navigate(one, BASE+'/#tickets')
-        print('Browser stage: list and keyboard', flush=True)
+        stage('list and keyboard')
         one.locator('[data-queue=all]').click()
         one.locator('#search').fill(label)
         expect(one.locator('#ticket-list .ticket-row')).to_have_count(1)
@@ -157,16 +182,21 @@ def main():
         one.keyboard.press('Escape')
         expect(one.locator('#create-dialog')).not_to_be_visible()
         expect(one.get_by_role('button', name='New ticket', exact=True)).to_be_focused()
+        stage('logout')
+        settle(one)
         one.get_by_label('Workspace menu').click(); one.locator('#signout').click()
         expect(one.locator('#login-dialog')).to_be_visible()
-        one.wait_for_load_state('networkidle')
+        settle(one)
+        stage('back')
         one.go_back()
-        one.wait_for_load_state('networkidle')
+        settle(one)
         expect(one.locator('#login-dialog')).to_be_visible()
         assert one.evaluate("sessionStorage.getItem('frontdesk-key')") is None
         result['checks'].extend(['search/filter', 'responsive screenshots', 'j/k/Enter', 'dialog Tab/Esc/focus return', 'logout/back'])
         # Revoke the browser's current session externally, then verify its 401 path.
         fresh = login(one, 'meera@arvo.example')
+        stage('revoke and refresh')
+        settle(one)
         assert one.request.post(BASE+'/auth/logout', headers={'Authorization': 'Bearer '+fresh}).status == 200
         one.get_by_label('Workspace menu').click(); one.locator('#refresh').click()
         expect(one.locator('#login-dialog')).to_be_visible()
