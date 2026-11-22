@@ -1,27 +1,26 @@
 """Credential identity, lifetime, isolation and secret-handling contracts."""
-from datetime import datetime, timedelta, timezone
 import json
 import logging
-from pathlib import Path
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row
 import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from psycopg import sql
+from psycopg.rows import dict_row
 
 from frontdesk.api import create_app
-from frontdesk.auth import hash_password, verify_password, token_hash
-from tests.conftest import TEST_PASSWORD, login_headers
+from frontdesk.auth import hash_password, token_hash, verify_password
 from scripts.seed_demo import seed
 from scripts.set_agent_password import set_password
+from tests.conftest import TEST_PASSWORD, login_headers
 
 
 @pytest.fixture
 def auth_harness(api_db):
-    instant = [datetime(2026, 11, 23, 4, 30, tzinfo=timezone.utc)]
+    instant = [datetime(2026, 11, 23, 4, 30, tzinfo=UTC)]
     app = create_app(api_db, sweep_token='test-sweep-secret', sweep_interval=0, auth_clock=lambda: instant[0])
     with TestClient(app) as client:
         yield client, api_db, instant
@@ -241,11 +240,14 @@ def test_demo_credentials_only_when_enabled(harness, monkeypatch):
 
 
 def test_restricted_runtime_can_authenticate_but_cannot_edit_audit(harness):
-    from scripts.provision_runtime import provision
-    c, url, _ = harness
+    from scripts.provision_runtime import provision, verify_runtime
+    _c, url, _ = harness
     role = 'auth_test_'+uuid4().hex
     try:
         runtime_url = provision(url, 'temporary-runtime-password', role=role)
+        proof = verify_runtime(runtime_url)
+        assert proof['role'] == role and not proof['events_update_delete_truncate']
+        assert proof['event_triggers'] == ['events_immutable', 'events_no_truncate', 'events_server_timestamp']
         with TestClient(create_app(runtime_url, sweep_interval=0)) as restricted:
             assert signin(restricted, password='wrong').status_code == 401
             headers = login_headers(restricted, 1)
@@ -284,6 +286,7 @@ def test_concurrent_failed_logins_share_one_database_counter(auth_harness, caplo
 def test_repeated_provisioning_with_non_superuser_owner(api_db):
     """Model Render's CREATEROLE owner, including the second deployment."""
     from psycopg.conninfo import make_conninfo
+
     from scripts.provision_runtime import provision
     owner = 'bootstrap_test_'+uuid4().hex
     role = 'runtime_test_'+uuid4().hex

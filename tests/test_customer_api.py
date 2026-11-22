@@ -68,6 +68,7 @@ def test_internal_note_marker_never_leaks(harness, seeded_ticket, agent_headers)
 
 def test_audit_writer_refuses_note_body(harness, seeded_ticket):
     import pytest
+
     from frontdesk.events import log_event
     _, url, _ = harness
     with psycopg.connect(url) as db:
@@ -94,7 +95,8 @@ def test_message_note_leak_and_customer_reply(harness, seeded_ticket, agent_head
 
 def test_complete_customer_route_inventory_and_note_leak_lifecycle(harness, agent_headers):
     from datetime import timedelta
-    from tests.test_mutations import create, event_types
+
+    from tests.test_mutations import create
     client, url, now = harness
     ticket = create(client, agent_headers)
     ticket_id = ticket["id"]

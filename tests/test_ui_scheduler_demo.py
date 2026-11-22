@@ -1,6 +1,6 @@
 import psycopg
-from psycopg.rows import dict_row
 from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
 
 from frontdesk.api import create_app
 from frontdesk.scheduler import Sweeper

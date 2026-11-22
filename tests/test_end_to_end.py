@@ -1,14 +1,17 @@
 from tests.conftest import login_headers
+
 """One deterministic, freshly migrated PostgreSQL scenario for the ticket lifecycle."""
-from datetime import datetime, timedelta
 import json
+from datetime import datetime, timedelta
+
 import psycopg
 import pytest
+
 from tests.test_business_time import at
 from tests.test_concurrency import parallel
 from tests.test_mutations import create, event_types
-from tests.test_security_hardening import rendered_ui, Tags
-from tests.test_sweep import wait, threshold, SWEEP
+from tests.test_security_hardening import Tags, rendered_ui
+from tests.test_sweep import SWEEP, threshold, wait
 
 
 def test_frontdesk_end_to_end(harness,agent_headers):
@@ -115,8 +118,8 @@ def test_frontdesk_end_to_end(harness,agent_headers):
     with psycopg.connect(url) as db:
         event_id=db.execute('SELECT id FROM events ORDER BY id LIMIT 1').fetchone()[0]
         for sql in ['UPDATE events SET actor=\'forged\' WHERE id=%s','DELETE FROM events WHERE id=%s']:
-            with pytest.raises(psycopg.errors.RaiseException,match='append-only'):
-                with db.transaction():db.execute(sql,(event_id,))
+            with pytest.raises(psycopg.errors.RaiseException,match='append-only'), db.transaction():
+                db.execute(sql,(event_id,))
 
     timeline=event_types(c,urgent['id'],owner)
     assert [(e['event_type'],e['actor']) for e in timeline]==[

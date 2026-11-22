@@ -3,7 +3,7 @@
 Run with TEST_DATABASE_URL set to a local PostgreSQL database with CREATE rights.
 """
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -49,17 +49,16 @@ def create_event(db):
 def test_events_reject_mutations(db, statement):
     import psycopg
     event_id, _ = create_event(db)
-    with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
-        with db.transaction():
-            db.execute(statement, (event_id,) if "%s" in statement else None)
+    with pytest.raises(psycopg.errors.RaiseException, match="append-only"), db.transaction():
+        db.execute(statement, (event_id,) if "%s" in statement else None)
     assert db.execute("SELECT actor FROM events WHERE id = %s", (event_id,)).fetchone()[0] == "system"
 
 
 def test_event_timestamp_is_server_generated(db):
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     _, stamped = create_event(db)
     assert stamped >= before
-    assert stamped <= datetime.now(timezone.utc)
+    assert stamped <= datetime.now(UTC)
 
 
 def test_holidays_extended_to_2027(db):

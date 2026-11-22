@@ -26,7 +26,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: npm ci --ignore-scripts
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run ruff check frontdesk scripts tests
+      - run: uv run mypy --explicit-package-bases --check-untyped-defs frontdesk scripts
       - run: uv run python -m scripts.verify
+      - run: uv run pip-audit --format json --output output-pip-audit.json
+      - run: npm audit --audit-level=low
+      - name: Save audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-evidence
+          path: |
+            output/audit/
+            output/screens/
+            output-pip-audit.json
       - run: node --check frontdesk/static/app.js
       - run: node --check frontdesk/static/customer.js
       - name: Build deployment image

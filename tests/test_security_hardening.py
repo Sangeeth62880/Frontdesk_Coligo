@@ -1,9 +1,11 @@
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
+
 import psycopg
 import pytest
+
 from tests.test_mutations import create, event_types
 
 
@@ -106,5 +108,5 @@ def test_mutation_event_counts_and_inc0318_event_derived_reply(harness,agent_hea
     for e in events:
         assert e['actor'] in {'customer','agent:1'} and 'before_value' in e and 'after_value' in e
         stamp=datetime.fromisoformat(e['created_at'])
-        assert abs(datetime.now(timezone.utc)-stamp)<timedelta(minutes=2)
+        assert abs(datetime.now(UTC)-stamp)<timedelta(minutes=2)
         assert 'NOTE_MARKER' not in json.dumps(e)

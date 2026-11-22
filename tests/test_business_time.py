@@ -3,7 +3,14 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from frontdesk.business_time import Calendar, Pause, Policy, deadlines, can_reopen, should_auto_close
+from frontdesk.business_time import (
+    Calendar,
+    Pause,
+    Policy,
+    can_reopen,
+    deadlines,
+    should_auto_close,
+)
 
 TZ = ZoneInfo("Asia/Kolkata")
 

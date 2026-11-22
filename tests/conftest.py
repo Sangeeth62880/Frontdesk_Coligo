@@ -1,18 +1,18 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg
+import pytest
+from fastapi.testclient import TestClient
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
-import pytest
-from fastapi.testclient import TestClient
 
 from frontdesk.api import create_app
 from frontdesk.auth import hash_password
 from frontdesk.business_time import ZONE
-from datetime import datetime
 
 
 @pytest.fixture

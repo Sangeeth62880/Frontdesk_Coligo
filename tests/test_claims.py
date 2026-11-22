@@ -4,6 +4,7 @@ from threading import Barrier
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+
 from tests.conftest import login_headers
 
 

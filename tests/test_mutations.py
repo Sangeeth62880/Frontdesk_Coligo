@@ -1,8 +1,7 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 from uuid import uuid4
 
 import psycopg
-import pytest
 
 from frontdesk.business_time import ZONE
 
@@ -20,7 +19,7 @@ def event_types(client, ticket_id, agent_headers):
 
 
 def test_first_reply_only_first_public_agent_message(harness, agent_headers):
-    client, url, now = harness
+    client, _url, now = harness
     ticket = create(client, agent_headers)
     path = f'/tickets/{ticket["id"]}'
     customer = {"X-Customer-Token": ticket["customer_token"]}
@@ -108,14 +107,14 @@ def test_agent_views_require_auth_and_customer_reply_is_scoped(harness, agent_he
 
 
 def test_client_timestamps_rejected_and_server_event_time_used(harness, agent_headers):
-    from datetime import datetime, timezone
+    from datetime import datetime
     client, _, _ = harness
-    before = datetime.now(timezone.utc)
+    before = datetime.now(UTC)
     bad = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Test", "customer_email": "a@example.com", "created_at": "2000-01-01T00:00:00Z"})
     assert bad.status_code == 422
     ticket = create(client, agent_headers)
     stamped = datetime.fromisoformat(event_types(client, ticket["id"], agent_headers)[0]["created_at"])
-    assert before <= stamped <= datetime.now(timezone.utc)
+    assert before <= stamped <= datetime.now(UTC)
     bad = client.post(f'/tickets/{ticket["id"]}/messages', headers=agent_headers, json={"body": "Reply", "created_at": "2000-01-01T00:00:00Z"})
     assert bad.status_code == 422
 

@@ -1,7 +1,14 @@
 import json
+
 import psycopg
 from fastapi.routing import APIRoute
-from frontdesk.serializers import TICKET_FIELDS, PRIVATE_TICKET_FIELDS, MESSAGE_FIELDS, customer_ticket
+
+from frontdesk.serializers import (
+    MESSAGE_FIELDS,
+    PRIVATE_TICKET_FIELDS,
+    TICKET_FIELDS,
+    customer_ticket,
+)
 from tests.test_mutations import create
 
 MARKER='NOTE_MARKER_7f3a'
@@ -19,7 +26,7 @@ def test_model_columns_require_explicit_privacy_decision(api_db):
 
 
 def test_notes_invisible_in_data_metadata_headers_errors_and_logs(harness,agent_headers,caplog):
-    c,url,now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
+    c,url,_now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
     customer={'X-Customer-Token':t['customer_token']}
     reads=['/customer/tickets',f'/customer/tickets/{t["id"]}','/export.csv']
     before={path:c.get(path,headers=customer).content for path in reads}
@@ -37,7 +44,7 @@ def test_notes_invisible_in_data_metadata_headers_errors_and_logs(harness,agent_
         ('POST','/auth/login'),('GET','/auth/me'),('POST','/auth/logout'),('GET','/health'),('GET','/agents'),('GET','/tickets'),('POST','/tickets'),
         ('POST','/customer/tickets'),('GET','/customer/tickets'),('GET','/customer/tickets/{ticket_id}'),
         ('GET','/export.csv'),('POST','/tickets/{ticket_id}/notes'),('POST','/tickets/{ticket_id}/claim'),
-        ('GET','/tickets/{ticket_id}'),('GET','/tickets/{ticket_id}/events'),
+        ('GET','/tickets/{ticket_id}'),('GET','/tickets/{ticket_id}/events'),('GET','/tickets/{ticket_id}/customer-access'),
         ('POST','/tickets/{ticket_id}/messages'),('POST','/tickets/{ticket_id}/customer-reply'),
         ('POST','/tickets/{ticket_id}/status'),('POST','/tickets/{ticket_id}/priority'),
         ('POST','/tickets/{ticket_id}/agent-reopen'),('POST','/tickets/{ticket_id}/reassign'),('POST','/tickets/{ticket_id}/reopen'),('POST','/admin/sweep')}

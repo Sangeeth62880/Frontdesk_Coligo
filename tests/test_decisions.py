@@ -1,10 +1,12 @@
 from datetime import timedelta
+
 import psycopg
+
 from tests.test_mutations import create, event_types
 
 
 def test_agent_creation_has_stored_null_reply_target(harness, agent_headers):
-    c, url, now = harness
+    c, url, _now = harness
     ticket = c.post('/tickets', headers=agent_headers, json={'subject':'On behalf', 'customer_email':'a@example.com', 'source':'agent'}).json()
     view = c.get(f'/tickets/{ticket["id"]}', headers=agent_headers).json()
     assert view['sla']['first_reply_due_at'] is None
@@ -30,7 +32,7 @@ def test_completed_on_time_never_becomes_late_and_late_reply_sticks(harness, age
 
 
 def test_claim_reassign_wait_and_invalid_transitions(harness, agent_headers):
-    c, _, now = harness
+    c, _, _now = harness
     t = create(c, agent_headers)
     path = f'/tickets/{t["id"]}'
     assert c.post(path+'/claim', headers=agent_headers).status_code == 200
@@ -98,7 +100,7 @@ def test_completed_cycle_outcome_is_independent_of_ticket_history(harness,agent_
 
 
 def test_agent_can_create_link_from_closed_without_editing_it(harness,agent_headers):
-    from tests.test_sweep import wait,threshold,SWEEP
+    from tests.test_sweep import SWEEP, threshold, wait
     c,url,now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
     wait(c,t,agent_headers);now[0]=threshold(url,now[0])
     assert c.post('/admin/sweep',headers=SWEEP).json()['closed_count']==1
@@ -112,10 +114,11 @@ def test_agent_can_create_link_from_closed_without_editing_it(harness,agent_head
 
 import pytest
 
+
 @pytest.mark.parametrize('old',['open','waiting_on_customer','resolved','closed'])
 @pytest.mark.parametrize('new',['open','waiting_on_customer','resolved','closed'])
 def test_status_transition_matrix(harness,agent_headers,old,new):
-    from tests.test_sweep import wait,threshold,SWEEP
+    from tests.test_sweep import SWEEP, threshold, wait
     c,url,now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
     c.post(p+'/claim',headers=agent_headers)
     if old in ('waiting_on_customer','closed'):
@@ -133,7 +136,7 @@ def test_status_transition_matrix(harness,agent_headers,old,new):
 
 @pytest.mark.parametrize('state',['resolved','closed'])
 def test_claim_completed_conflicts(harness,agent_headers,state):
-    from tests.test_sweep import wait,threshold,SWEEP
+    from tests.test_sweep import SWEEP, threshold, wait
     c,url,now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
     c.post(p+'/claim',headers=agent_headers)
     if state=='closed':

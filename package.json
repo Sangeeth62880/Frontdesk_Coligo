@@ -1,0 +1,6 @@
+{
+  "name": "frontdesk-browser-audit",
+  "private": true,
+  "description": "Accessibility rules for the Python Playwright audit; no frontend build required",
+  "devDependencies": {"axe-core": "4.11.1"}
+}

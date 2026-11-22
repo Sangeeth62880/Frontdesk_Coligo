@@ -1,8 +1,18 @@
 from datetime import date, datetime, timedelta
+
 import pytest
-from frontdesk.business_time import Calendar, Pause, Policy, deadlines, can_reopen, should_auto_close
+
+from frontdesk.business_time import (
+    Calendar,
+    Pause,
+    Policy,
+    can_reopen,
+    deadlines,
+    should_auto_close,
+)
 from tests.test_business_time import at
-from tests.test_mutations import create, event_types
+from tests.test_mutations import create
+
 
 @pytest.fixture
 def cal():

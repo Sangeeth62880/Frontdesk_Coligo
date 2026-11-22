@@ -1,5 +1,5 @@
-from html.parser import HTMLParser
 from datetime import datetime
+from html.parser import HTMLParser
 
 import psycopg
 import pytest

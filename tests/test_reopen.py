@@ -2,7 +2,6 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 import psycopg
-import pytest
 
 from frontdesk.business_time import Calendar
 from tests.test_mutations import create, event_types
@@ -49,7 +48,7 @@ def test_exact_2700_reopens_new_cycle_preserving_breach_event(harness, agent_hea
 
 
 def test_2701_creates_linked_ticket(harness, agent_headers):
-    client, url, _ = harness
+    client, _url, _ = harness
     old = reopen_at(harness, agent_headers, 2701)
     headers = {"X-Customer-Token": old["customer_token"]}
     original_events = event_types(client, old["id"], agent_headers)
@@ -99,6 +98,7 @@ def test_reopen_auth_and_active_ticket_conflict(harness, agent_headers):
 def test_parallel_reopen_creates_one_cycle(harness, agent_headers):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
+
     from fastapi.testclient import TestClient
     client, url, _ = harness
     ticket = reopen_at(harness, agent_headers, 1)

@@ -1,13 +1,15 @@
-from tests.conftest import login_headers
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, Event
 from datetime import timedelta
+from threading import Barrier, Event
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+
 from frontdesk import service
+from tests.conftest import login_headers
 from tests.test_mutations import create, event_types
-from tests.test_sweep import wait, threshold, SWEEP
+from tests.test_sweep import SWEEP, threshold, wait
 
 
 def parallel(client, actions):
@@ -21,7 +23,7 @@ def parallel(client, actions):
 
 
 def test_n_claims_one_event(harness,agent_headers):
-    c,url,_=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
+    c,_url,_=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
     credentials={i:login_headers(c,i) for i in range(1,10)}
     results=parallel(c,[lambda c,i=i:c.post(p+'/claim',headers=credentials[i]) for i in range(1,10)])
     assert sorted(r.status_code for r in results)==[200]+[409]*8
