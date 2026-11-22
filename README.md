@@ -64,7 +64,7 @@ Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open opera
 - No pagination or database connection pooling.
 - No audit hash chain.
 - Holiday seeds end December 25, 2027 and need extending before later dates can be calculated.
-- Chromium lifecycle, accessibility, responsive screenshots and native CSV download are automated locally. Hosted verification covered login/list/logout and responsive list checks; the complete hosted lifecycle still needs a post-deploy pass.
+- Chromium lifecycle, accessibility, responsive screenshots and native CSV download passed locally and against the hosted release; natural 12-hour expiry and live-account lockout remain local deterministic coverage. See [release evidence](docs/RELEASE.md).
 - One-week uptime has not yet been observed.
 
 ## Documentation

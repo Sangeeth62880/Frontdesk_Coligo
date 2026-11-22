@@ -1,6 +1,6 @@
 # Frontdesk final audit — 22 November 2026
 
-The initial findings below were reported before application fixes. Local fixes and verification are recorded below; hosted release checks remain open. Original decisions in `docs/DECISIONS.md` are frozen. Existing tests will not be weakened or deleted. Evidence under ignored `output/audit/` is local verification output, not committed credentials.
+The initial findings below were reported before application fixes. This document preserves that audit snapshot, including failed measurements and then-open release checks. Current publication, CI, deployment and hosted verification are recorded in [RELEASE.md](RELEASE.md), which supersedes the delivery-status statements below. Existing tests were not weakened or deleted. Original decisions are preserved with the user's one authorized reassignment line added at release. Evidence under ignored `output/audit/` is local verification output, not committed credentials.
 
 ## Findings (first reported before fixes; current status shown)
 

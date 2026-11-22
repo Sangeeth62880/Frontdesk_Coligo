@@ -1,6 +1,6 @@
 # Frontdesk submission
 
-The earlier application is live on Render and published to GitHub. This local final-audit branch has additional fixes that are not yet published or deployed.
+The audited application is published to GitHub main and live on Render in Sangeeth's workspace. Current release evidence is recorded in [docs/RELEASE.md](docs/RELEASE.md).
 
 - Live: [frontdesk-spfe.onrender.com](https://frontdesk-spfe.onrender.com)
 - Repository: [Sangeeth62880/Frontdesk_Coligo](https://github.com/Sangeeth62880/Frontdesk_Coligo)
@@ -10,10 +10,10 @@ The earlier application is live on Render and published to GitHub. This local fi
 
 ## Verification
 
-The local audit adds real Chromium/axe, native CSV download, property/reference checks, OpenAPI-generated request fuzzing and event replay. Full outputs, load metrics and exact remaining checks are in [docs/AUDIT.md](docs/AUDIT.md). The existing linked [CI run](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45034482014) covers the earlier published commit; it does not prove these uncommitted local changes. Updated CI commands are prepared but have not run remotely.
+The audit adds real Chromium/axe, native CSV download, property/reference checks, OpenAPI-generated request fuzzing and event replay. [Release CI](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45056188460) passed 228 tests without skips, static checks, dependency audits and the Docker build. Hosted checks confirmed token-free agent list/detail responses, restricted runtime privileges, immutable event triggers, sweep heartbeat logging and security headers including HSTS. The repeated hosted load test had zero errors across 300 reads and ten creates; read p95 was 1.235 seconds and conservative writer p95 was 2.588 seconds. The full hosted Chromium lifecycle passed, with zero axe violations, JavaScript errors or failed requests on its final run. Earlier browser failures and remaining limitations are recorded in [docs/RELEASE.md](docs/RELEASE.md). Initial audit findings remain in [docs/AUDIT.md](docs/AUDIT.md).
 
-## Residual risk — submission draft
+## Residual risk
 
-Local tests exercise SLA/calendar edges, immutable audit storage, claims, privacy, abuse limits, API fuzzing and Chromium accessibility, but the audit fixes are not yet deployed. The current hosted version still exposes customer capabilities to other agents and the paced hosted read test had 63 errors in 284 requests, so a deploy followed by hosted security/load/lifecycle retesting is required before claiming readiness. I preserved existing demo history and left verification tickets 9–18 clearly labeled; the six-case deterministic seed is available for a fresh schema. Customer capabilities still have no expiry/rotation, account recovery/MFA and an external tamper-proof audit sink remain outside scope, holiday data stops at 25 December 2027, and a future week of uptime is unproven. These were deferred to preserve the tested core workflow; the next steps are deployment/retest, operational access checks and ongoing hosting/calendar maintenance.
+Local tests exercise SLA/calendar edges, immutable audit storage, claims, privacy, abuse limits, API fuzzing and Chromium accessibility. Hosted security and load checks pass after deployment; the earlier failed load result is retained as historical evidence. Existing demo history and clearly labeled verification tickets remain intact; the six-case deterministic seed is available for a fresh schema. Customer capabilities still have no expiry/rotation, account recovery/MFA and an external tamper-proof audit sink remain outside scope, holiday data stops at 25 December 2027, and idle cold-start latency and a future week of uptime are unproven. Natural 12-hour expiry and lockout were not induced on live accounts. The external database allowlist remains closed; actual runtime privileges and triggers were checked through the internal startup connection. Ongoing hosting/calendar maintenance remains necessary.
 
 Deployment caveats: [docs/DEPLOY.md](docs/DEPLOY.md). Frozen decisions: [docs/DECISIONS.md](docs/DECISIONS.md). API: [docs/API.md](docs/API.md).
