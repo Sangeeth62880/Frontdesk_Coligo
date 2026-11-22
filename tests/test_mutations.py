@@ -84,6 +84,7 @@ def test_resolve_snapshots_breach_and_cannot_bypass_reopen(harness, agent_header
     ticket = create(client, agent_headers, "urgent")
     now[0] += timedelta(days=1)
     path = f'/tickets/{ticket["id"]}'
+    assert client.post(path+'/claim', headers=agent_headers).status_code == 200
     response = client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"})
     assert response.status_code == 200
     event = event_types(client, ticket["id"], agent_headers)[-1]

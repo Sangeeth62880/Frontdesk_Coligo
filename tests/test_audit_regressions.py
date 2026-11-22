@@ -139,6 +139,7 @@ def test_customer_idor_including_linked_chain(harness, agent_headers):
     for suffix in ('customer-reply', 'reopen'):
         assert c.post(p+'/'+suffix, headers=h, json={'body':'Attack'} if suffix=='customer-reply' else {}).status_code == 404
     assert c.get(f'/customer/tickets/{y["id"]}', headers=h).status_code == 404
+    assert c.post(p+'/claim', headers=agent_headers).status_code == 200
     version = c.get(p, headers=agent_headers).json()['version']
     assert c.post(p+'/status', headers=agent_headers, json={'status':'resolved','version':version}).status_code == 200
     now[0] += timedelta(days=10)

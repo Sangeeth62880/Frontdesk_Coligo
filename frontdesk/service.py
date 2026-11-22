@@ -12,6 +12,11 @@ def locked_ticket(db, ticket_id):
     return row
 
 
+def require_assignee(ticket, agent_id):
+    if ticket['assignee_id'] != agent_id:
+        raise HTTPException(409, 'Claim this ticket first; only its assignee can make this change')
+
+
 def calendar_and_policy(db, priority):
     calendar = Calendar(frozenset(row["day"] for row in db.execute("SELECT day FROM holidays")))
     row = db.execute("SELECT * FROM sla_policies WHERE priority = %s", (priority,)).fetchone()

@@ -18,6 +18,7 @@ def test_completed_on_time_never_becomes_late_and_late_reply_sticks(harness, age
     c, _, now = harness
     ticket = create(c, agent_headers)
     path = f'/tickets/{ticket["id"]}'
+    assert c.post(path+'/claim', headers=agent_headers).status_code == 200
     assert c.post(path+'/status', headers=agent_headers, json={"version": c.get((path+'/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), 'status':'resolved'}).status_code == 200
     now[0] += timedelta(days=10)
     assert c.get(path, headers=agent_headers).json()['sla']['is_late'] is False
@@ -74,6 +75,7 @@ def test_customer_completed_reply_links_or_reopens_and_agent_reopen(harness, age
 
 def test_reopen_does_not_turn_on_time_first_cycle_into_a_reply_breach(harness,agent_headers):
     c,_,now=harness;t=create(c,agent_headers);p=f'/tickets/{t["id"]}'
+    assert c.post(p+'/claim', headers=agent_headers).status_code == 200
     version=c.get(p,headers=agent_headers).json()['version']
     c.post(p+'/status',headers=agent_headers,json={'status':'resolved','version':version})
     now[0]+=timedelta(days=2)

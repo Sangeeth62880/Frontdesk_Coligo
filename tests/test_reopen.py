@@ -13,6 +13,7 @@ def reopen_at(harness, agent_headers, minutes):
     # Resolve after its urgent end-of-day deadline to preserve a real breach.
     now[0] += timedelta(days=1)
     path = f'/tickets/{ticket["id"]}'
+    assert client.post(path+'/claim', headers=agent_headers).status_code == 200
     assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"}).status_code == 200
     with psycopg.connect(url) as db:
         calendar = Calendar(frozenset(row[0] for row in db.execute("SELECT day FROM holidays")))

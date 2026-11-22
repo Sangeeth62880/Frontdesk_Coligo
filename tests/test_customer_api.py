@@ -100,6 +100,7 @@ def test_complete_customer_route_inventory_and_note_leak_lifecycle(harness, agen
     client, url, now = harness
     ticket = create(client, agent_headers)
     ticket_id = ticket["id"]
+    assert client.post(f'/tickets/{ticket_id}/claim', headers=agent_headers).status_code == 200
     access = {"X-Customer-Token": ticket["customer_token"]}
     marker = "NEVER_PUBLIC_" + uuid4().hex
     assert client.post(f'/tickets/{ticket_id}/messages', headers=agent_headers, json={"visibility": "internal", "body": marker}).status_code == 201

@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import psycopg
 import pytest
 
+from tests.conftest import login_headers
 from tests.test_mutations import create, event_types
 
 
@@ -100,13 +101,15 @@ def test_mutation_event_counts_and_inc0318_event_derived_reply(harness,agent_hea
     exactly('resumed',lambda:c.post(p+'/customer-reply',headers={'X-Customer-Token':t['customer_token']},json={'body':'Answer'}))
     exactly('reassigned',lambda:c.post(p+'/reassign',headers=agent_headers,json={'assignee_id':2}))
     version=c.get(p,headers=agent_headers).json()['version']
-    exactly('status_changed',lambda:c.post(p+'/status',headers=agent_headers,json={'status':'resolved','version':version}))
+    exactly('status_changed',lambda:c.post(p+'/status',headers=login_headers(c,2),json={'status':'resolved','version':version}))
     exactly('reopened',lambda:c.post(p+'/reopen',headers={'X-Customer-Token':t['customer_token']}))
     events=event_types(c,t['id'],agent_headers)
     assert [e['id'] for e in events]==sorted(e['id'] for e in events)
     assert [datetime.fromisoformat(e['created_at']) for e in events]==sorted(datetime.fromisoformat(e['created_at']) for e in events)
     for e in events:
-        assert e['actor'] in {'customer','agent:1'} and 'before_value' in e and 'after_value' in e
+        assert e['actor'] in {'customer','agent:1','agent:2'} and 'before_value' in e and 'after_value' in e
+        if e['actor']=='agent:2':
+            assert e['event_type']=='status_changed' and e['after_value']['status']=='resolved'
         stamp=datetime.fromisoformat(e['created_at'])
         assert abs(datetime.now(UTC)-stamp)<timedelta(minutes=2)
         assert 'NOTE_MARKER' not in json.dumps(e)

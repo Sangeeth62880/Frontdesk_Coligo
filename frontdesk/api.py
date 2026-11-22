@@ -401,6 +401,8 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
     @app.post("/tickets/{ticket_id}/status")
     def status(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: StatusInput, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
+        if data.status == 'resolved':
+            service.require_assignee(ticket, actor['id'])
         if ticket["version"] != data.version:
             raise HTTPException(409, "Ticket changed; refresh and retry with its current version")
         if data.status == "waiting_on_customer":
@@ -418,6 +420,8 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
     @app.post("/tickets/{ticket_id}/priority")
     def priority(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: PriorityInput, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
+        if ticket['assignee_id'] is not None:
+            service.require_assignee(ticket, actor['id'])
         updated = service.change_priority(db, ticket, data.priority, now(db), f"agent:{actor['id']}")
         return {**customer_ticket(updated), "version": updated["version"], "sla": service.sla(db, updated, now(db))}
 
