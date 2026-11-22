@@ -15,13 +15,15 @@ Prerequisites: Python 3.12+, uv, Node.js, and Docker Compose (or PostgreSQL 17).
 
 ```sh
 uv sync --locked
+npm ci --ignore-scripts
+uv run playwright install chromium
 cp .env.example .env
 docker compose up -d --wait db
 uv run --env-file .env python -m scripts.verify
 uv run --env-file .env python -m scripts.start
 ```
 
-Edit `.env` to set `DATABASE_URL`, `FRONTDESK_DEMO_PASSWORD` and `FRONTDESK_SWEEP_TOKEN`, and check `TEST_DATABASE_URL` points to the verification database; `FRONTDESK_DB_PASSWORD` enables restricted-role provisioning.
+Before verification, edit `.env` to set `DATABASE_URL`, `FRONTDESK_DEMO_PASSWORD` and `FRONTDESK_SWEEP_TOKEN`, and check `TEST_DATABASE_URL` points to the verification database; `FRONTDESK_DB_PASSWORD` enables restricted-role provisioning.
 
 ## Architecture
 
@@ -42,7 +44,9 @@ Buildless HTML/CSS/JavaScript served from FastAPI and PostgreSQL, with plain SQL
 - Audit events are append-only: database triggers reject UPDATE, DELETE and TRUNCATE, and assign server timestamps.
 - Per-agent email/password login uses salted scrypt hashes, hashed 12-hour bearer sessions, logout revocation and database-backed throttling.
 
-Full detail: docs/DECISIONS.md
+Priority changes retain elapsed time because the customer has already waited. Restarting at the change time would hide lateness and allow the clock to be gamed; that alternative was rejected. Customer capabilities are absent from every agent list/detail response. Customer actions fetch their capability through a separate current-assignee-only endpoint. Only the current assignee can transfer ownership, preventing reassignment from bypassing capability isolation. An agent who creates a ticket receives its initial capability; capabilities already shared cannot be recalled without rotation.
+
+Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open operational checks: [Audit](docs/AUDIT.md), [requirement traceability](docs/TRACEABILITY.md). The local audit fixes have not yet been published or deployed.
 
 ## Incidents
 
@@ -60,7 +64,7 @@ Full detail: docs/DECISIONS.md
 - No pagination or database connection pooling.
 - No audit hash chain.
 - Holiday seeds end December 25, 2027 and need extending before later dates can be calculated.
-- Real-browser tests are manual, not automated; native CSV download completion remains unconfirmed.
+- Chromium lifecycle, accessibility, responsive screenshots and native CSV download are automated locally. Hosted verification covered login/list/logout and responsive list checks; the complete hosted lifecycle still needs a post-deploy pass.
 - One-week uptime has not yet been observed.
 
 ## Documentation
@@ -69,3 +73,13 @@ Full detail: docs/DECISIONS.md
 - [Deployment](docs/DEPLOY.md)
 - [Decisions](docs/DECISIONS.md)
 - [Testing](docs/TESTING.md)
+
+## Audit commands and limits
+
+The verification command runs PostgreSQL integration tests, 2,000 deterministic Hypothesis/reference cases, 150 OpenAPI-generated request cases, stress replay and headless Chromium with axe. PostgreSQL needs CREATE SCHEMA and CREATEROLE for isolated test schemas/roles. Run `uv run ruff check frontdesk scripts tests`, `uv run mypy --explicit-package-bases --check-untyped-defs frontdesk scripts`, `uv run pip-audit`, and `npm audit` for separate static/security checks. Dependencies are exactly resolved in `uv.lock` and `package-lock.json`; direct Python constraints intentionally permit compatible updates only when the lock is refreshed.
+
+Public intake permits 10 tickets per resolved client IP per ten-minute window (`FRONTDESK_INTAKE_LIMIT`), shared across processes in PostgreSQL. Uvicorn resolves trusted proxy addresses; never accept arbitrary forwarded identity headers. Configure `FORWARDED_ALLOW_IPS` for a known reverse proxy if needed; absent trusted proxy resolution, a shared proxy may share a quota. Request bodies are limited to 65,536 streamed bytes (`FRONTDESK_MAX_BODY_BYTES`); subject is 300 characters, messages 10,000, and null characters are rejected. DB connects time out in five seconds and statements in 10,000 ms (`FRONTDESK_STATEMENT_TIMEOUT_MS`). Startup emits structured request records with server request IDs and omits query strings, bodies and access tokens; `FRONTDESK_LOG_LEVEL` defaults to INFO.
+
+Explicit load command: `uv run --env-file .env pytest tests/audit_load.py -q -s` (requires `TEST_DATABASE_URL` in `.env`). This runs for 60 seconds and is separate from routine verification. Hosted check: `uv run python -m scripts.audit_hosted --browser --load`; it uses the enabled demo hint only in memory, caps reads at five/second across 50 virtual users and creates ten clearly labeled tickets. Do not repeat it casually on a free tier. Synthetic records remain intentionally labeled because deleting or rewriting their event history would defeat immutability.
+
+For a **fresh empty migrated schema only**, `uv run --env-file .env python -m scripts.seed_review_demo --as-of 2026-11-23T10:00:00+05:30` creates six deterministic cases (late, waiting, Friday evening, near reopen, urgent, unassigned). Reruns preserve their events; a populated unrelated schema is refused. This does not rewrite the shared hosted demo.

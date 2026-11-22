@@ -26,3 +26,4 @@
 `first_reply_at` and `first_reply_actor` in the agent detail come from the first public agent audit event; `first_replied_at` is the existing materialized SLA field. Ticket-wide `resolution_breached` includes retained history; `cycle_resolution_breached` describes the current cycle's own outcome. On-time initial resolution freezes the original first-reply obligation even if no reply was required to resolve. Reading agent SLA data records monotonic breach flags under the ticket lock; it does not add audit events or advance the status version. Existing recorded resolution-cycle breaches are imported by migration 006. Migration 006 removes the first-reply obligation from legacy tickets whose creation event identifies an agent. Unknown legacy sources keep the conservative first-reply requirement; no source is invented.
 
 [README](../README.md) · [Testing](TESTING.md)
+- Reassignment requires the current assignee.

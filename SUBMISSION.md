@@ -1,6 +1,6 @@
 # Frontdesk submission
 
-The application is live on Render and published to GitHub; CI, Docker build, hosted API checks and a manual browser workflow are verified.
+The earlier application is live on Render and published to GitHub. This local final-audit branch has additional fixes that are not yet published or deployed.
 
 - Live: [frontdesk-spfe.onrender.com](https://frontdesk-spfe.onrender.com)
 - Repository: [Sangeeth62880/Frontdesk_Coligo](https://github.com/Sangeeth62880/Frontdesk_Coligo)
@@ -10,17 +10,10 @@ The application is live on Render and published to GitHub; CI, Docker build, hos
 
 ## Verification
 
-The suite passes **195 tests, zero skipped**. [CI](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45034482014) passed the suite, JavaScript checks and Docker image build. Hosted API checks covered both ticket sources, concurrent claims, assignee-only public replies, privacy, wait/resume, priority, resolution, reopen, CSV and logout. A manual browser pass covered the main workflow and the dedicated Take this ticket button. CSV content passed API checks; native browser download completion remains unconfirmed. Details and historical checkpoints are in [docs/TESTING.md](docs/TESTING.md).
+The local audit adds real Chromium/axe, native CSV download, property/reference checks, OpenAPI-generated request fuzzing and event replay. Full outputs, load metrics and exact remaining checks are in [docs/AUDIT.md](docs/AUDIT.md). The existing linked [CI run](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45034482014) covers the earlier published commit; it does not prove these uncommitted local changes. Updated CI commands are prepared but have not run remotely.
 
-## What I did not finish
+## Residual risk — submission draft
 
-- Free-tier cold starts remain; sweeps depend on the awake service or the optional GitHub schedule, whose repository secrets still need configuring.
-- Password reset/change UI, MFA, SSO and session listing are not implemented.
-- No authenticated customer portal or token delivery; the customer conversation page uses a capability token.
-- Pagination and database connection pooling are not implemented.
-- No audit hash chain; database triggers and restricted privileges protect append-only events.
-- Holiday seeds end December 25, 2027 and need extending.
-- Real-browser tests are manual, not automated; native CSV download completion remains unconfirmed.
-- One-week uptime has not yet been observed; the free database expires on December 22, 2026 at 19:56 IST.
+Local tests exercise SLA/calendar edges, immutable audit storage, claims, privacy, abuse limits, API fuzzing and Chromium accessibility, but the audit fixes are not yet deployed. The current hosted version still exposes customer capabilities to other agents and the paced hosted read test had 63 errors in 284 requests, so a deploy followed by hosted security/load/lifecycle retesting is required before claiming readiness. I preserved existing demo history and left verification tickets 9–18 clearly labeled; the six-case deterministic seed is available for a fresh schema. Customer capabilities still have no expiry/rotation, account recovery/MFA and an external tamper-proof audit sink remain outside scope, holiday data stops at 25 December 2027, and a future week of uptime is unproven. These were deferred to preserve the tested core workflow; the next steps are deployment/retest, operational access checks and ongoing hosting/calendar maintenance.
 
-Deployment and operational caveats: [docs/DEPLOY.md](docs/DEPLOY.md). Full decisions: [docs/DECISIONS.md](docs/DECISIONS.md). API contracts: [docs/API.md](docs/API.md).
+Deployment caveats: [docs/DEPLOY.md](docs/DEPLOY.md). Frozen decisions: [docs/DECISIONS.md](docs/DECISIONS.md). API: [docs/API.md](docs/API.md).
