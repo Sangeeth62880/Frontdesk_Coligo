@@ -2,6 +2,8 @@
 import html
 import json
 import re
+import sys
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ OUT = Path('output/release')
 
 
 def main():
+    expect.set_options(timeout=30000)
     OUT.mkdir(parents=True, exist_ok=True)
     response = requests.get(BASE, timeout=120)
     match = re.search(r'Password: ([^<]*)</p>', response.text)
@@ -40,6 +43,7 @@ def main():
             result['axe'][name] = violations
             assert not violations, (name, violations)
         def login(page, email):
+            print('Browser stage: sign in', flush=True)
             page.goto(BASE)
             page.locator('#login-email').fill(email)
             page.locator('#login-password').fill(password)
@@ -51,6 +55,7 @@ def main():
         token = login(one, 'meera@arvo.example')
         login(two, 'arun@arvo.example')
         headers = {'Authorization': 'Bearer '+token}
+        print('Browser stage: create and claim', flush=True)
         one.get_by_role('button', name='New ticket', exact=True).click()
         one.locator('[name=subject]').fill(label+' '+payload)
         one.locator('[name=customer_email]').fill('release-verification@arvo.example')
@@ -75,6 +80,7 @@ def main():
         assert access.status == 200
         capability = access.json()['customer_token']
         result['checks'].extend(['UI create', 'two-context claim conflict', 'list/detail capability absence', 'assignee-only customer access'])
+        print('Browser stage: agent conversation', flush=True)
         one.get_by_role('button', name='Internal note', exact=True).click()
         expect(one.locator('#reply-form')).to_have_class('composer internal')
         one.locator('#reply-body').fill('RELEASE_PRIVATE_NOTE_'+stamp)
@@ -95,6 +101,7 @@ def main():
         axe(one, 'ticket')
         result['checks'].extend(['public/internal visuals', 'inert subject/body XSS', 'waiting public question', 'priority timeline snapshot'])
         customer = a.new_page()
+        print('Browser stage: customer conversation', flush=True)
         customer.on('pageerror', lambda error: errors.append(str(error)))
         customer.goto(BASE+f'/customer#{ticket_id}:{capability}')
         expect(customer.locator('h2')).to_contain_text(label)
@@ -123,6 +130,7 @@ def main():
         expect(one.locator('.detail-customer')).to_contain_text('Cycle 2')
         result['checks'].extend(['customer note privacy', 'customer answer resumes', 'native CSV download', 'simulated answer', 'resolve/reopen'])
         one.goto(BASE+'/#tickets')
+        print('Browser stage: list and keyboard', flush=True)
         one.locator('[data-queue=all]').click()
         one.locator('#search').fill(label)
         expect(one.locator('#ticket-list .ticket-row')).to_have_count(1)
@@ -158,6 +166,7 @@ def main():
         result['checks'].append('revoked-session 401 redirects')
         result['js_errors'] = errors
         result['failed_requests'] = failed
+        print(json.dumps({'js_errors': errors, 'failed_requests': failed}), flush=True)
         assert not errors and not failed, (errors, failed)
         result['unverified'] = ['12-hour natural expiry not waited; revoked-session 401 tested instead', 'lockout not induced on live demo agents', 'historical late-first ordering remains local deterministic coverage']
         a.close(); b.close(); browser.close()
@@ -166,4 +175,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as exc:  # noqa: BLE001 — browser snapshots can contain credentials.
+        print(f'Hosted browser verification failed: {type(exc).__name__}', file=sys.stderr)
+        for frame in traceback.extract_tb(exc.__traceback__):
+            if frame.filename == __file__:
+                print(f'{frame.name}: line {frame.lineno}', file=sys.stderr)
+        sys.exit(1)
