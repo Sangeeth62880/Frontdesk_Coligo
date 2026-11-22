@@ -39,7 +39,7 @@ Database tests require `TEST_DATABASE_URL` and permission to create schemas and 
 
 ## Using the screen
 
-Select My tickets, Unassigned or All tickets. Search by subject, email or ticket ID and choose an active/completed filter. Late tickets sort first. Claim an unassigned ticket before posting a public reply. The reply box defaults to Public; Internal note switches to an amber team-only mode. Status and priority controls sit above the conversation. Activity timeline shows every mutation, including priority deadline snapshots and completed-cycle breaches.
+Select My tickets, Unassigned or All tickets. Search by subject, email or ticket ID and choose an active/completed filter. Late tickets sort first. Use the dedicated Take this ticket button beside Assignee to claim an unassigned ticket before posting a public reply. The reply box defaults to Public; Internal note switches to an amber team-only mode. Status and priority controls sit above the conversation. Activity timeline shows every mutation, including priority deadline snapshots and completed-cycle breaches.
 
 Create a ticket with New ticket. Source defaults to Customer request, including a first-reply target; select Agent-initiated to omit that target. Simulate a customer reply from the ticket action, or open Customer view in a separate tab; the customer page cannot load agent notes or agent timelines. Resolving a ticket enables customer and agent reopening. Selecting Waiting prompts for a public question, or sends the public draft in the composer, in the same transaction. The customer view can also download the allowlisted CSV. Drafts remain in memory while the ticket stays selected; changing tickets discards an unsent draft.
 

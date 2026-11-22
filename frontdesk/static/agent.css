@@ -121,3 +121,5 @@ th,.message-header time,.event time,.deadline>span:first-child{font-size:13px}
   #list-page .waiting { gap: 6px; }
   #list-page .queue-footer { padding-left: 16px; padding-right: 16px; }
 }
+
+.assignee-control{display:flex;flex-direction:column;gap:4px}.assignee-control .field-label{color:var(--muted)}.ticket-controls .claim-button{align-self:center}
