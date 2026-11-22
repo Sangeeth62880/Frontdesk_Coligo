@@ -14,6 +14,7 @@ from uuid import UUID
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi import Path as ApiPath
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     FileResponse,
@@ -372,7 +373,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         result = mutation()
         db.execute("""INSERT INTO request_idempotency(actor, key, fingerprint, response) VALUES (%s,%s,%s,%s)
             ON CONFLICT (actor,key) DO UPDATE SET fingerprint=EXCLUDED.fingerprint, response=EXCLUDED.response, created_at=clock_timestamp()""",
-            (actor, key, fingerprint, Jsonb(result)))
+            (actor, key, fingerprint, Jsonb(jsonable_encoder(result))))
         return result
 
     @app.post("/tickets/{ticket_id}/messages", status_code=201)
@@ -399,23 +400,31 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return idempotent(db, f"customer:{token}", idempotency_key, f"/tickets/{ticket_id}/customer-reply", data, mutation)
 
     @app.post("/tickets/{ticket_id}/status")
-    def status(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: StatusInput, db: DB, actor: Agent):
-        ticket = service.locked_ticket(db, ticket_id)
-        if data.status == 'resolved':
-            service.require_assignee(ticket, actor['id'])
-        if ticket["version"] != data.version:
-            raise HTTPException(409, "Ticket changed; refresh and retry with its current version")
-        if data.status == "waiting_on_customer":
-            if not data.body or not data.body.strip():
-                raise HTTPException(422, "Waiting requires a public agent message in the same request")
-            if ticket["status"] != "open":
-                raise HTTPException(409, "Only open tickets can start waiting")
-            service.public_message(db, ticket, data.body, now(db), f"agent:{actor['id']}", actor["id"])
-        if data.status == "open" and ticket["status"] == "resolved":
-            action, updated = service.reopen(db, ticket, now(db), f"agent:{actor['id']}")
-            return {**customer_ticket(updated), "version": updated["version"], "action": action, "sla": service.sla(db, updated, now(db))}
-        updated = service.change_status(db, ticket, data.status, now(db), f"agent:{actor['id']}")
-        return {**customer_ticket(updated), "version": updated["version"], "sla": service.sla(db, updated, now(db))}
+    def status(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: StatusInput, db: DB, actor: Agent,
+               idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
+        def mutation():
+            ticket = service.locked_ticket(db, ticket_id)
+            if data.status == 'resolved':
+                service.require_assignee(ticket, actor['id'])
+            if ticket["version"] != data.version:
+                raise HTTPException(409, "Ticket changed; refresh and retry with its current version")
+            if data.status == "waiting_on_customer":
+                if not data.body or not data.body.strip():
+                    raise HTTPException(422, "Waiting requires a public agent message in the same request")
+                if ticket["status"] != "open":
+                    raise HTTPException(409, "Only open tickets can start waiting")
+                service.public_message(db, ticket, data.body, now(db), f"agent:{actor['id']}", actor["id"])
+            if data.status == "open" and ticket["status"] == "resolved":
+                action, updated = service.reopen(db, ticket, now(db), f"agent:{actor['id']}")
+                return {**customer_ticket(updated), "version": updated["version"], "action": action, "sla": service.sla(db, updated, now(db))}
+            if data.status == 'resolved' and data.body is not None:
+                if not data.body.strip():
+                    raise HTTPException(422, 'Resolution message cannot be blank')
+                service.public_message(db, ticket, data.body, now(db), f"agent:{actor['id']}", actor['id'])
+            updated = service.change_status(db, ticket, data.status, now(db), f"agent:{actor['id']}")
+            return {**customer_ticket(updated), "version": updated["version"], "sla": service.sla(db, updated, now(db))}
+
+        return idempotent(db, f"agent:{actor['id']}", idempotency_key, f'/tickets/{ticket_id}/status', data, mutation)
 
     @app.post("/tickets/{ticket_id}/priority")
     def priority(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: PriorityInput, db: DB, actor: Agent):
