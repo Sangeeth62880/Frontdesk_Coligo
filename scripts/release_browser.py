@@ -33,10 +33,15 @@ def main():
         browser = p.chromium.launch()
         a, b = browser.new_context(accept_downloads=True), browser.new_context()
         one, two = a.new_page(), b.new_page()
+        def navigate(page, url):
+            # Explicit test navigation must not cancel the app's current refresh.
+            page.wait_for_load_state('networkidle')
+            page.goto(url)
+            page.wait_for_load_state('networkidle')
         for page in (one, two):
             page.set_default_timeout(30000)
             page.on('pageerror', lambda error: errors.append(str(error)))
-            page.on('requestfailed', lambda request: failed.append(request.url.split('?')[0]))
+            page.on('requestfailed', lambda request: failed.append(f'{request.url.split("?")[0]}: {request.failure}'))
         def axe(page, name):
             page.evaluate(Path('node_modules/axe-core/axe.min.js').read_text())
             violations = page.evaluate("async()=> (await axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}})).violations.map(v=>({id:v.id,impact:v.impact}))")
@@ -44,13 +49,13 @@ def main():
             assert not violations, (name, violations)
         def login(page, email):
             print('Browser stage: sign in', flush=True)
-            page.goto(BASE)
+            navigate(page, BASE)
             page.locator('#login-email').fill(email)
             page.locator('#login-password').fill(password)
             page.get_by_role('button', name='Sign in', exact=True).click()
             expect(page.locator('#login-dialog')).not_to_be_visible()
             return page.evaluate("sessionStorage.getItem('frontdesk-key')")
-        one.goto(BASE)
+        navigate(one, BASE)
         axe(one, 'login')
         token = login(one, 'meera@arvo.example')
         login(two, 'arun@arvo.example')
@@ -66,7 +71,7 @@ def main():
         path = f'/tickets/{ticket_id}'
         assert not one.evaluate('Boolean(window.XSS_EXECUTED)')
         for page in (one, two):
-            page.goto(BASE+'/#ticket/'+str(ticket_id))
+            navigate(page, BASE+'/#ticket/'+str(ticket_id))
             expect(page.get_by_role('button', name='Take this ticket')).to_be_visible()
         one.get_by_role('button', name='Take this ticket').click()
         expect(one.locator('#ticket-assignee')).to_have_text('Meera')
@@ -103,7 +108,7 @@ def main():
         customer = a.new_page()
         print('Browser stage: customer conversation', flush=True)
         customer.on('pageerror', lambda error: errors.append(str(error)))
-        customer.goto(BASE+f'/customer#{ticket_id}:{capability}')
+        navigate(customer, BASE+f'/customer#{ticket_id}:{capability}')
         expect(customer.locator('h2')).to_contain_text(label)
         expect(customer.locator('body')).not_to_contain_text('RELEASE_PRIVATE_NOTE_')
         assert customer.url == BASE+'/customer'
@@ -129,7 +134,7 @@ def main():
         one.get_by_role('button', name='Reopen ticket').click()
         expect(one.locator('.detail-customer')).to_contain_text('Cycle 2')
         result['checks'].extend(['customer note privacy', 'customer answer resumes', 'native CSV download', 'simulated answer', 'resolve/reopen'])
-        one.goto(BASE+'/#tickets')
+        navigate(one, BASE+'/#tickets')
         print('Browser stage: list and keyboard', flush=True)
         one.locator('[data-queue=all]').click()
         one.locator('#search').fill(label)
@@ -154,7 +159,9 @@ def main():
         expect(one.get_by_role('button', name='New ticket', exact=True)).to_be_focused()
         one.get_by_label('Workspace menu').click(); one.locator('#signout').click()
         expect(one.locator('#login-dialog')).to_be_visible()
+        one.wait_for_load_state('networkidle')
         one.go_back()
+        one.wait_for_load_state('networkidle')
         expect(one.locator('#login-dialog')).to_be_visible()
         assert one.evaluate("sessionStorage.getItem('frontdesk-key')") is None
         result['checks'].extend(['search/filter', 'responsive screenshots', 'j/k/Enter', 'dialog Tab/Esc/focus return', 'logout/back'])
