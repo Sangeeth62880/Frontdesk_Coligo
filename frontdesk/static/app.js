@@ -1,63 +1,157 @@
 'use strict';
 const $ = s => document.querySelector(s);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const date = value => value ? new Intl.DateTimeFormat('en-IN', {timeZone:'Asia/Kolkata',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hour12:true}).format(new Date(value)) : '—';
+const date = value => value ? new Intl.DateTimeFormat('en-GB', {timeZone:'Asia/Kolkata',weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value)).replace(/^(\w+), /,'$1 ') : '—';
+const fullDate = value => value ? new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).format(new Date(value))+' IST' : 'No deadline';
+const time = value => `<time ${value?`datetime="${esc(value)}"`:''} title="${esc(fullDate(value))}">${esc(date(value))}</time>`;
+const ticketID = id => `FD-${String(id).padStart(4,'0')}`;
+const statusText = ticket => ticket.status==='waiting_on_customer'
+  ? '<span class="status waiting" title="Waiting on customer"><span class="waiting-dot" aria-hidden="true"></span>Waiting</span>'
+  : `<span class="status ${['resolved','closed'].includes(ticket.status)?'muted':''}">${esc(labels[ticket.status])}</span>`;
+const istDay = value => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(value));
+function relativeTime(value){
+  if(!value)return '—';
+  const seconds=Math.max(0,Math.floor((Date.now()-new Date(value).getTime())/1000));
+  if(seconds<60)return 'Just now';
+  if(seconds<3600)return `${Math.floor(seconds/60)}m ago`;
+  if(seconds<86400)return `${Math.floor(seconds/3600)}h ago`;
+  return `${Math.floor(seconds/86400)}d ago`;
+}
+function dueText(ticket){
+  const value=ticket.sla.resolution_due_at;
+  if(!value)return '—';
+  const clock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value));
+  const text=istDay(value)===istDay(Date.now())?`<span class="today">Today</span>, ${esc(clock)}`:esc(date(value));
+  return `<time datetime="${esc(value)}" title="${esc(fullDate(value))}">${text}</time>${ticket.sla.is_late?'<span class="late-label">Late</span>':''}`;
+}
+// Presentation order only: keep the API's SLA flags and deadlines authoritative.
+function ticketSortGroup(ticket){return ticket.sla.is_late?0:ticket.status==='open'?1:ticket.status==='waiting_on_customer'?2:3;}
+function ticketSortDeadline(ticket){
+  const resolution=new Date(ticket.sla.resolution_due_at).getTime();
+  if(!ticket.sla.is_late)return resolution;
+  const overdue=[];
+  if(ticket.sla.resolution_breached)overdue.push(resolution);
+  if(!ticket.first_replied_at&&ticket.sla.cycle_number===1&&ticket.sla.first_reply_breached)overdue.push(new Date(ticket.sla.first_reply_due_at).getTime());
+  return overdue.length?Math.min(...overdue):resolution;
+}
+function compareTickets(a,b){return ticketSortGroup(a)-ticketSortGroup(b)||ticketSortDeadline(a)-ticketSortDeadline(b)||a.id-b.id;}
 const labels = {open:'Open',waiting_on_customer:'Waiting on customer',resolved:'Resolved',closed:'Closed'};
-const state = {token:sessionStorage.getItem('frontdesk-key') || '',agent:Number(sessionStorage.getItem('frontdesk-agent') || 1),agents:[],tickets:[],queue:'me',selected:null,detail:null,events:[],tab:'conversation',mode:'public',draft:'',version:0};
+const state = {token:sessionStorage.getItem('frontdesk-key') || '',agent:0,epoch:0,agents:[],tickets:[],lastActivity:new Map(),queue:'me',selected:null,detail:null,events:[],tab:'conversation',mode:'public',draft:'',version:0};
 let toastTimer, refreshing = false, refreshAgain = false;
 function toast(message){$('#toast').textContent=message;$('#toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').hidden=true,6000);}
-async function request(path, {method='GET', body, customerToken, signal}={}){
-  const headers = customerToken ? {'X-Customer-Token':customerToken} : {'Authorization':`Bearer ${state.token}`,'X-Agent-Id':String(state.agent)};
+async function request(path, {method='GET', body, customerToken, signal, idempotencyKey}={}){
+  const headers = customerToken ? {'X-Customer-Token':customerToken} : {'Authorization':`Bearer ${state.token}`};
+  if(idempotencyKey) headers['Idempotency-Key']=idempotencyKey;
   if(body !== undefined) headers['Content-Type']='application/json';
+  const epoch=state.epoch;
   const response=await fetch(path,{method,headers,body:body === undefined ? undefined : JSON.stringify(body),signal});
   const data=await response.json().catch(()=>({detail:'Unexpected server response'}));
+  if(response.status===401)clearSession();
+  if(epoch!==state.epoch&&response.ok){const error=new Error('Please sign in again.');error.status=401;throw error;}
   if(!response.ok){const error=new Error(typeof data.detail==='string'?data.detail:response.status===422?'Please check the form fields.':data.detail?.message || 'Request failed');error.status=response.status;error.detail=data.detail;throw error;}
   return data;
 }
-function badges(ticket){return `<span class="badge ${esc(ticket.priority)}">${esc(ticket.priority.toUpperCase())}</span>${ticket.sla.is_late?'<span class="badge late">LATE</span>':''}${ticket.status!=='open'?`<span class="badge ${ticket.status==='waiting_on_customer'?'waiting':esc(ticket.status)}">${esc(labels[ticket.status])}</span>`:''}`;}
-function visibleTickets(){const query=$('#search').value.trim().toLowerCase(),status=$('#status-filter').value;return state.tickets.filter(t=>(state.queue==='all'||state.queue==='me'&&t.assignee_id===state.agent||state.queue==='unassigned'&&t.assignee_id===null)&&(status==='all'||status==='active'&&['open','waiting_on_customer'].includes(t.status)||t.status===status)&&`${t.id} ${t.subject} ${t.customer_email}`.toLowerCase().includes(query));}
+function visibleTickets(){const query=$('#search').value.trim().toLowerCase(),status=$('#status-filter').value;return state.tickets.filter(t=>(state.queue==='all'||state.queue==='me'&&t.assignee_id===state.agent||state.queue==='unassigned'&&t.assignee_id===null)&&(status==='all'||status==='active'&&['open','waiting_on_customer'].includes(t.status)||t.status===status)&&`${t.id} ${t.subject} ${t.customer_email}`.toLowerCase().includes(query)).sort(compareTickets);}
 function renderList(){
   const rows=visibleTickets();
   $('#my-count').textContent=state.tickets.filter(t=>t.assignee_id===state.agent&&['open','waiting_on_customer'].includes(t.status)).length;
   $('#unassigned-count').textContent=state.tickets.filter(t=>t.assignee_id===null&&['open','waiting_on_customer'].includes(t.status)).length;
   $('#all-count').textContent=state.tickets.length;
-  const queue=state.tickets.filter(t=>state.queue==='all'||state.queue==='me'&&t.assignee_id===state.agent||state.queue==='unassigned'&&t.assignee_id===null);
-  $('#stat-open').textContent=queue.filter(t=>t.status==='open').length;$('#stat-late').textContent=queue.filter(t=>t.sla.is_late).length;$('#stat-waiting').textContent=queue.filter(t=>t.status==='waiting_on_customer').length;$('#stat-done').textContent=queue.filter(t=>['resolved','closed'].includes(t.status)).length;
-  $('#ticket-list').innerHTML=rows.length?rows.map(t=>`<button class="ticket-row ${t.id===state.selected?'selected':''} ${t.sla.is_late?'late':''}" data-ticket="${t.id}" aria-pressed="${t.id===state.selected}"><div class="row-top"><span class="ticket-number">FD-${String(t.id).padStart(4,'0')}</span><span class="due-small ${t.sla.is_late?'danger-text':''}">${esc(date(t.sla.resolution_due_at))}</span></div><h3>${esc(t.subject)}</h3><div class="row-bottom"><span class="row-email">${esc(t.customer_email)}</span><span class="badges">${badges(t)}</span></div></button>`).join(''):'<div class="empty">No tickets here.<br>Try another queue or create a new ticket.</div>';
-  $('#queue-footer').textContent=`${rows.length} ticket${rows.length===1?'':'s'} · Late tickets first · All times IST`;
+  const mine=state.queue==='me';
+  $('#list-page').classList.toggle('mine',mine);
+  $('#assignee-heading').hidden=mine;
+  $('#ticket-list').innerHTML=rows.length?rows.map(t=>{
+    const activity=state.lastActivity.get(t.id);
+    return `<tr class="ticket-row" data-ticket="${t.id}"><td class="ticket-number">${ticketID(t.id)}</td><td class="subject"><a href="#ticket/${t.id}" title="${esc(t.subject)}">${esc(t.subject)}</a></td><td class="row-status">${statusText(t)}</td><td class="row-priority ${t.priority==='urgent'?'urgent':'muted'}">${esc(t.priority[0].toUpperCase()+t.priority.slice(1))}</td>${mine?'':`<td class="row-assignee">${esc(state.agents.find(a=>a.id===t.assignee_id)?.name || 'Unassigned')}</td>`}<td class="row-activity"><time ${activity?`datetime="${esc(activity)}"`:''} title="${activity?esc(fullDate(activity)):'No activity recorded'}">${relativeTime(activity)}</time></td><td class="row-due ${t.sla.is_late?'danger-text':''}">${dueText(t)}</td></tr>`;
+  }).join(''):`<tr class="empty-row"><td colspan="${mine?6:7}" class="empty">No tickets here.</td></tr>`;
+  $('#queue-footer').textContent=`${rows.length} ticket${rows.length===1?'':'s'} · Late tickets first · j / k to move, Enter to open`;
 }
 function eventLabel(event){return {created:'Ticket created',claimed:'Ticket claimed',public_reply:'Public message added',internal_note_added:'Internal note added',status_changed:'Status changed',priority_changed:'Priority changed',paused:'Resolution clock paused',resumed:'Waiting interval ended',auto_closed:'Automatically closed',reopened:'New resolution cycle opened'}[event.event_type] || event.event_type;}
 function actorName(actor){if(actor.startsWith('agent:'))return state.agents.find(a=>a.id===Number(actor.split(':')[1]))?.name || actor;return actor==='system'?'System':'Customer';}
+function renderActivity(){return state.events.map(e=>`<div class="event">${time(e.created_at)}<span>${esc(eventLabel(e))} · ${esc(actorName(e.actor))}${e.after_value?.status?` · ${esc(labels[e.after_value.status] || e.after_value.status)}`:''}${e.event_type==='priority_changed'?` · ${esc(e.before_value?.priority)} → ${esc(e.after_value.priority)}`:''}</span></div>`).join('') || '<p class="empty">No activity yet.</p>';}
 function renderThread(){
-  if(state.tab==='history')return state.events.map(e=>`<article class="event"><strong>${esc(eventLabel(e))}</strong><time>${esc(date(e.created_at))} · ${esc(actorName(e.actor))}</time>${e.after_value?.status?`<p>${esc(labels[e.after_value.status] || e.after_value.status)}</p>`:''}${e.event_type==='priority_changed'?`<p>${esc(e.before_value?.priority)} to ${esc(e.after_value.priority)}</p>`:''}<details><summary>Event details</summary><pre>${esc(JSON.stringify({before:e.before_value,after:e.after_value},null,2))}</pre></details></article>`).join('') || '<div class="empty">No events yet.</div>';
   const t=state.detail;const messages=[...t.messages,...t.internal_notes.map(n=>({...n,author_type:'agent'}))].sort((a,b)=>new Date(a.created_at)-new Date(b.created_at)||a.id-b.id);
-  return messages.map(m=>`<article class="message ${m.visibility==='internal'?'internal':m.author_type==='customer'?'customer':''}"><div class="message-header"><span class="avatar">${esc(m.author_type==='customer'?'CU':(state.agents.find(a=>a.id===m.agent_id)?.name || 'AG').slice(0,2).toUpperCase())}</span><strong>${esc(m.author_type==='customer'?'Customer':state.agents.find(a=>a.id===m.agent_id)?.name || 'Agent')}</strong>${m.visibility==='internal'?'<span class="private-label">🔒 Team only</span>':''}<time>${esc(date(m.created_at))}</time></div><p class="message-body">${esc(m.body)}</p></article>`).join('') || '<div class="empty">No messages yet. Start the conversation with a public reply.</div>';
+  return messages.map(m=>`<article class="message ${m.visibility==='internal'?'internal':''}"><div class="message-header"><strong>${esc(m.author_type==='customer'?'Customer':state.agents.find(a=>a.id===m.agent_id)?.name || 'Agent')}</strong>${time(m.created_at)}${m.visibility==='internal'?'<span class="private-label">Team-only</span>':''}</div><p class="message-body">${esc(m.body)}</p></article>`).join('') || '<p class="empty">No messages yet.</p>';
 }
 function renderDetail(){
   const t=state.detail;if(!t)return;
-  const active=['open','waiting_on_customer'].includes(t.status),mine=t.assignee_id===state.agent,owner=state.agents.find(a=>a.id===t.assignee_id)?.name || 'Unassigned';
+  const activityOpen=$('#activity')?.open,active=['open','waiting_on_customer'].includes(t.status),mine=t.assignee_id===state.agent,owner=state.agents.find(a=>a.id===t.assignee_id)?.name || 'Unassigned';
   const customerURL=`/customer#${t.id}:${t.customer_token}`;
-  $('#detail').innerHTML=`<div class="detail-header"><div class="detail-meta"><span class="ticket-number">FD-${String(t.id).padStart(4,'0')} · CYCLE ${t.sla.cycle_number}</span><a class="customer-link" href="${esc(customerURL)}" target="_blank" rel="noopener">Customer view</a></div><h2>${esc(t.subject)}</h2><p class="detail-customer">${esc(t.customer_email)} · Created ${esc(date(t.created_at))}</p><div class="badges detail-badges">${badges(t)}</div></div><div class="ticket-controls"><span class="owner">${mine?'Assigned to you':esc(owner)}</span>${active&&!t.assignee_id?'<button id="claim" class="primary">Take this ticket</button>':''}<select id="ticket-status" aria-label="Ticket status" ${active?'':'disabled'}>${Object.entries(labels).map(([key,value])=>`<option value="${key}" ${key===t.status?'selected':''} ${key==='closed'?'disabled':''}>${value}</option>`).join('')}</select><select id="ticket-priority" aria-label="Ticket priority" ${active?'':'disabled'}>${['urgent','medium','small'].map(p=>`<option ${p===t.priority?'selected':''} value="${p}">${p[0].toUpperCase()+p.slice(1)}</option>`).join('')}</select>${!active?'<button id="reopen" class="secondary">Reopen as customer</button>':''}</div><div class="sla-strip"><div><span>${t.first_replied_at?'FIRST REPLY SENT':'FIRST REPLY DUE'}</span><strong class="${!t.first_replied_at&&t.sla.first_reply_breached?'danger-text':''}">${esc(date(t.first_replied_at || t.sla.first_reply_due_at))}</strong></div><div><span>${t.status==='waiting_on_customer'?'RESOLUTION PAUSED · PROJECTED DUE':'RESOLUTION DUE'}</span><strong class="${t.sla.resolution_breached?'danger-text':''}">${esc(date(t.sla.resolution_due_at))}</strong></div></div><div class="tabs" role="tablist" aria-label="Ticket content"><button class="tab ${state.tab==='conversation'?'active':''}" data-tab="conversation" role="tab" aria-selected="${state.tab==='conversation'}">Conversation <span class="subtle">${t.messages.length+t.internal_notes.length}</span></button><button class="tab ${state.tab==='history'?'active':''}" data-tab="history" role="tab" aria-selected="${state.tab==='history'}">Activity timeline <span class="subtle">${state.events.length}</span></button></div><div class="thread" role="tabpanel">${renderThread()}</div>${state.tab==='conversation'?`<form id="reply-form" class="composer ${state.mode==='internal'?'internal':''}"><div class="mode-switch" aria-label="Reply visibility"><button type="button" data-mode="public" class="${state.mode==='public'?'active':''}" aria-pressed="${state.mode==='public'}">Public reply</button><button type="button" data-mode="internal" class="${state.mode==='internal'?'active':''}" aria-pressed="${state.mode==='internal'}">🔒 Internal note</button></div><p class="composer-hint">${state.mode==='internal'?'Only your team can see this note.':!active?'Reopen this ticket before sending a public reply.':!mine?'Take this ticket to send a public reply.':'This reply will be visible to the customer.'}</p><textarea id="reply-body" aria-label="${state.mode==='internal'?'Internal note':'Public reply'}" placeholder="${state.mode==='internal'?'Leave context for your team…':'Write a reply to the customer…'}" maxlength="20000" required ${state.mode==='public'&&(!active||!mine)?'disabled':''}>${esc(state.draft)}</textarea><div class="composer-actions"><span>${state.mode==='internal'?'TEAM ONLY':'VISIBLE TO CUSTOMER'}</span><button class="primary" type="submit" ${state.mode==='public'&&(!active||!mine)?'disabled':''}>${state.mode==='internal'?'Add internal note':'Send reply'}</button></div></form>`:''}${active?'<div class="customer-actions"><button id="simulate" class="quiet">Simulate a customer reply</button><button id="export" class="quiet">Export customer-safe CSV</button></div>':'<div class="customer-actions"><button id="export" class="quiet">Export customer-safe CSV</button></div>'}`;
+  $('#detail').innerHTML=`<header class="detail-header"><div class="detail-navigation"><a href="#tickets">← Tickets</a><details class="overflow"><summary aria-label="Ticket actions">…</summary><div class="menu">${active?'<button id="simulate">Simulate customer reply</button>':''}<button id="export">Export CSV</button><a href="${esc(customerURL)}" target="_blank" rel="noopener">Customer view</a></div></details></div><p class="ticket-number">${ticketID(t.id)}</p><h1 tabindex="-1">${esc(t.subject)}</h1><p class="detail-customer">${esc(t.customer_email)} · Created ${time(t.created_at)} · Cycle ${t.sla.cycle_number}</p></header>
+  <div class="ticket-controls"><label>Status <select id="ticket-status" class="${t.status==='waiting_on_customer'?'waiting':''}" aria-label="Ticket status" ${active?'':'disabled'}>${Object.entries(labels).map(([key,value])=>`<option value="${key}" ${key===t.status?'selected':''} ${key==='closed'?'disabled':''}>${value}</option>`).join('')}</select></label><label>Priority <select id="ticket-priority" class="${t.priority==='urgent'?'urgent':''}" aria-label="Ticket priority" ${active?'':'disabled'}>${['urgent','medium','small'].map(p=>`<option ${p===t.priority?'selected':''} value="${p}">${p[0].toUpperCase()+p.slice(1)}</option>`).join('')}</select></label><label>Assignee <select id="ticket-assignee" aria-label="Ticket assignee" ${active&&!t.assignee_id?'':'disabled'}><option value="current">${esc(owner)}</option>${active&&!t.assignee_id?'<option value="claim">Take this ticket</option>':''}</select></label><div class="deadline"><span>First reply ${t.first_replied_at?'sent':'due'}</span><span class="${!t.first_replied_at&&t.sla.first_reply_breached?'danger-text':''}">${time(t.first_reply_at || t.sla.first_reply_due_at)}${t.first_reply_actor?` · ${esc(actorName(t.first_reply_actor))}`:''}</span></div><div class="deadline"><span>Resolution due${t.status==='waiting_on_customer'?' · paused':''}</span><span class="${t.sla.resolution_breached?'danger-text':''}">${time(t.sla.resolution_due_at)}${t.sla.resolution_breached?' <span class="late-label">Late</span>':''}</span></div>${!active?'<button id="reopen">Reopen ticket</button>':''}<span class="breached-targets">${t.sla.breached_targets?.length?`Breached: ${esc(t.sla.breached_targets.join(', ').replaceAll('_',' '))}`:''}</span></div>
+  <section class="thread" aria-label="Conversation">${renderThread()}</section>
+  <details id="activity" class="activity" ${activityOpen?'open':''}><summary>Activity <span>${state.events.length}</span></summary>${renderActivity()}</details>
+  <form id="reply-form" class="composer ${state.mode==='internal'?'internal':''}"><div class="mode-switch" aria-label="Reply visibility"><button type="button" data-mode="public" class="${state.mode==='public'?'active':''}" aria-pressed="${state.mode==='public'}">Reply to customer</button><span aria-hidden="true">|</span><button type="button" data-mode="internal" class="${state.mode==='internal'?'active':''}" aria-pressed="${state.mode==='internal'}">Internal note</button></div><textarea id="reply-body" aria-label="${state.mode==='internal'?'Internal note':'Public reply'}" placeholder="${state.mode==='internal'?'Leave context for your team…':'Write a reply to the customer…'}" maxlength="10000" required ${state.mode==='public'&&(!active||!mine)?'disabled':''}>${esc(state.draft)}</textarea><div class="composer-actions"><p class="composer-hint">${state.mode==='internal'?'Only your team can see this note.':!active?'Reopen this ticket before sending a public reply.':!mine?'Take this ticket to send a public reply.':'This reply will be visible to the customer.'}</p><button class="primary" type="submit" ${state.mode==='public'&&(!active||!mine)?'disabled':''}>${state.mode==='internal'?'Add note':'Send reply'}</button></div></form>`;
+  $('#list-page').hidden=true;$('#detail').hidden=false;
 }
-async function selectTicket(id){state.selected=id;state.draft='';state.mode='public';state.tab='conversation';renderList();await loadDetail();}
+function showList(){state.selected=null;state.detail=null;state.version++;$('#list-page').hidden=false;$('#detail').hidden=true;renderList();}
+async function selectTicket(id){state.selected=id;state.draft='';state.replyKey=null;state.mode='public';state.tab='conversation';$('#detail').innerHTML='<p class="empty">Loading ticket…</p>';$('#list-page').hidden=true;$('#detail').hidden=false;if(location.hash!==`#ticket/${id}`)location.hash=`ticket/${id}`;await loadDetail();$('#detail h1')?.focus({preventScroll:true});window.scrollTo(0,0);}
+function route(){const match=location.hash.match(/^#ticket\/(\d+)$/);if(match){if(state.selected!==Number(match[1]))selectTicket(Number(match[1])).catch(handleError);}else showList();}
+window.addEventListener('hashchange',route);
 async function loadDetail(){if(!state.selected)return;const version=++state.version,id=state.selected;const [detail,events]=await Promise.all([request(`/tickets/${id}`),request(`/tickets/${id}/events`)]);if(version!==state.version||id!==state.selected)return;state.detail=detail;state.events=events;renderDetail();}
-async function refresh(){if(refreshing){refreshAgain=true;return;}refreshing=true;try{state.tickets=await request('/tickets?assignee=all');renderList();if(state.selected)await loadDetail();else{const first=visibleTickets()[0];if(first)await selectTicket(first.id);}}catch(error){handleError(error);}finally{refreshing=false;if(refreshAgain){refreshAgain=false;await refresh();}}}
-function handleError(error){if(error.status===401){state.token='';sessionStorage.removeItem('frontdesk-key');if(!$('#login-dialog').open)$('#login-dialog').showModal();}toast(error.message);}
+async function refresh(){if(refreshing){refreshAgain=true;return;}refreshing=true;try{const tickets=await request('/tickets?assignee=all');
+  // Use existing event reads; do not substitute ticket creation/update timestamps.
+  const activity=await Promise.all(tickets.map(async ticket=>{
+    const events=await request(`/tickets/${ticket.id}/events`);
+    const latest=events.reduce((last,event)=>!last||new Date(event.created_at)>new Date(last)?event.created_at:last,null);
+    return [ticket.id,latest];
+  }));
+  state.tickets=tickets;state.lastActivity=new Map(activity);renderList();if(state.selected)await loadDetail();else if(location.hash.startsWith('#ticket/'))route();}catch(error){handleError(error);}finally{refreshing=false;if(refreshAgain){refreshAgain=false;await refresh();}}}
+function showLogin(){
+  $('#main').hidden=true;$('.topbar').hidden=true;
+  if(!$('#login-dialog').open)$('#login-dialog').showModal();
+}
+function clearSession(){
+  state.epoch++;state.token='';state.agent=0;state.agents=[];state.tickets=[];state.detail=null;state.selected=null;state.events=[];state.lastActivity=new Map();state.draft='';state.version++;
+  sessionStorage.clear();$('#detail').innerHTML='';$('#ticket-list').innerHTML='';$('#agent').textContent='';
+  if($('#create-dialog').open)$('#create-dialog').close();
+  showLogin();
+}
+function handleError(error){if(error.status===401)clearSession();toast(error.message);}
 async function mutate(path,body,options={}){const selected=state.selected;try{await request(path,{method:'POST',body,...options});await refresh();return true;}catch(error){if(error.status===409&&error.detail?.assignee_name){toast(`${error.detail.assignee_name} already took this ticket. The ticket has been refreshed.`);if(selected)await refresh();}else{handleError(error);await refresh();}return false;}}
-async function connect(){state.agents=await request('/agents');$('#agent').innerHTML=state.agents.map(a=>`<option value="${a.id}" ${a.id===state.agent?'selected':''}>${esc(a.name)}</option>`).join('');await refresh();}
-$('#login-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;state.token=$('#access-key').value.trim();try{await connect();sessionStorage.setItem('frontdesk-key',state.token);$('#login-dialog').close();$('#access-key').value='';$('#login-error').textContent='';}catch(error){$('#login-error').textContent=error.message;}finally{button.disabled=false;}});
+async function connect(){
+  const me=await request('/auth/me');state.agent=me.id;$('#agent').textContent=me.name;
+  state.agents=await request('/agents');await refresh();
+  if(!state.token)throw new Error('Please sign in again.');
+  $('#main').hidden=false;$('.topbar').hidden=false;
+}
+$('#login-form').addEventListener('submit',async e=>{
+  e.preventDefault();const button=e.submitter;button.disabled=true;
+  try{
+    const result=await request('/auth/login',{method:'POST',body:{email:$('#login-email').value,password:$('#login-password').value}});
+    state.token=result.token;sessionStorage.setItem('frontdesk-key',state.token);
+    await connect();$('#login-dialog').close();$('#login-error').textContent='';
+  }catch(error){$('#login-error').textContent=error.status===429?'Too many sign-in attempts. Try again in 10 minutes.':'Unable to sign in. Check your email and password.';}
+  finally{$('#login-password').value='';button.disabled=false;}
+});
 $('#login-dialog').addEventListener('cancel',e=>e.preventDefault());
-$('#signout').addEventListener('click',()=>{sessionStorage.clear();location.reload();});
-$('#agent').addEventListener('change',async e=>{state.agent=Number(e.target.value);sessionStorage.setItem('frontdesk-agent',state.agent);state.selected=null;state.detail=null;$('#detail').innerHTML='<div class="empty detail-empty">Select a ticket to see its conversation.</div>';await refresh();});
-document.querySelectorAll('[data-queue]').forEach(button=>button.addEventListener('click',()=>{state.queue=button.dataset.queue;document.querySelectorAll('[data-queue]').forEach(b=>b.classList.toggle('selected',b===button));$('#queue-title').textContent={me:'My tickets',unassigned:'Unassigned',all:'All tickets'}[state.queue];renderList();}));
-$('#search').addEventListener('input',renderList);$('#status-filter').addEventListener('change',renderList);$('#refresh').addEventListener('click',refresh);
-$('#ticket-list').addEventListener('click',e=>{const row=e.target.closest('[data-ticket]');if(row)selectTicket(Number(row.dataset.ticket)).catch(handleError);});
+$('#signout').addEventListener('click',async()=>{try{await request('/auth/logout',{method:'POST'});}catch(error){handleError(error);}finally{clearSession();}});
+document.querySelectorAll('[data-queue]').forEach(button=>button.addEventListener('click',()=>{state.queue=button.dataset.queue;document.querySelectorAll('[data-queue]').forEach(b=>b.classList.toggle('selected',b===button));document.querySelectorAll('[data-queue]').forEach(b=>{if(b===button)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});location.hash='tickets';showList();}));
+$('#search').addEventListener('input',()=>{if(state.selected){location.hash='tickets';showList();}else renderList();});$('#status-filter').addEventListener('change',renderList);$('#refresh').addEventListener('click',refresh);
+$('#ticket-list').addEventListener('click',e=>{const row=e.target.closest('[data-ticket]');if(row&&!e.target.closest('a'))selectTicket(Number(row.dataset.ticket)).catch(handleError);});
 $('#new-ticket').addEventListener('click',()=>$('#create-dialog').showModal());document.querySelectorAll('.close-dialog').forEach(b=>b.addEventListener('click',()=>$('#create-dialog').close()));
 $('#create-form').addEventListener('submit',async e=>{e.preventDefault();e.submitter.disabled=true;try{const data=Object.fromEntries(new FormData(e.target));const ticket=await request('/tickets',{method:'POST',body:data});$('#create-dialog').close();e.target.reset();state.queue='unassigned';document.querySelector('[data-queue="unassigned"]').click();await refresh();await selectTicket(ticket.id);toast('Ticket created. Take ownership to send a reply.');}catch(error){$('#create-error').textContent=error.message;}finally{e.submitter.disabled=false;}});
-$('#detail').addEventListener('input',e=>{if(e.target.id==='reply-body')state.draft=e.target.value;});
-$('#detail').addEventListener('change',async e=>{if(e.target.id==='ticket-status')await mutate(`/tickets/${state.selected}/status`,{status:e.target.value});if(e.target.id==='ticket-priority')await mutate(`/tickets/${state.selected}/priority`,{priority:e.target.value});});
-$('#detail').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{if(b.dataset.tab){state.tab=b.dataset.tab;renderDetail();return;}if(b.dataset.mode){state.mode=b.dataset.mode;renderDetail();$('#reply-body')?.focus();return;}if(!['claim','reopen','simulate','export'].includes(b.id))return;b.disabled=true;const t=state.detail;if(b.id==='claim'){if(await mutate(`/tickets/${t.id}/claim`))toast('Ticket assigned to you.');}if(b.id==='reopen'){const result=await request(`/tickets/${t.id}/reopen`,{method:'POST',customerToken:t.customer_token});$('#status-filter').value='all';await refresh();await selectTicket(result.ticket.id);toast(result.action==='reopen'?'A new resolution cycle has started.':'Reopen window expired. A linked ticket was created.');}if(b.id==='simulate'){const body=prompt('Customer reply (visible in the public conversation):');if(body?.trim()){await mutate(`/tickets/${t.id}/customer-reply`,{body:body.trim()},{customerToken:t.customer_token});toast('Customer reply added. Any waiting clock has resumed.');}}if(b.id==='export'){const response=await fetch('/export.csv',{headers:{'X-Customer-Token':t.customer_token}});if(!response.ok)throw new Error('Export failed');const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`frontdesk-${t.id}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}catch(error){handleError(error);}finally{b.disabled=false;}});
-$('#detail').addEventListener('submit',async e=>{if(e.target.id!=='reply-form')return;e.preventDefault();e.submitter.disabled=true;const draft=state.draft,mode=state.mode;try{await request(`/tickets/${state.selected}/messages`,{method:'POST',body:{body:draft,visibility:mode}});state.draft='';await refresh();toast(mode==='internal'?'Internal note added. Only your team can see it.':'Public reply sent.');}catch(error){state.draft=draft;handleError(error);}finally{e.submitter.disabled=false;}});
-if(state.token)connect().catch(handleError);else $('#login-dialog').showModal();
+$('#detail').addEventListener('input',e=>{if(e.target.id==='reply-body'){state.draft=e.target.value;state.replyKey=null;}});
+$('#detail').addEventListener('change',async e=>{if(e.target.id==='ticket-assignee'&&e.target.value==='claim'){if(await mutate(`/tickets/${state.selected}/claim`))toast('Ticket assigned to you.');}if(e.target.id==='ticket-status'){
+  const status=e.target.value,payload={status,version:state.detail.version};
+  if(status==='waiting_on_customer'){
+    const body=state.mode==='public'&&state.draft.trim()?state.draft:prompt('Public question to send before waiting:');
+    if(!body?.trim()){renderDetail();return;}payload.body=body;
+  }
+  if(await mutate(`/tickets/${state.selected}/status`,payload)){if(payload.body){state.draft='';renderDetail();}}
+}if(e.target.id==='ticket-priority')await mutate(`/tickets/${state.selected}/priority`,{priority:e.target.value});});
+$('#detail').addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;try{if(b.dataset.tab){state.tab=b.dataset.tab;renderDetail();return;}if(b.dataset.mode){state.mode=b.dataset.mode;state.replyKey=null;renderDetail();$('#reply-body')?.focus();return;}if(!['claim','reopen','simulate','export'].includes(b.id))return;b.disabled=true;const t=state.detail;if(b.id==='claim'){if(await mutate(`/tickets/${t.id}/claim`))toast('Ticket assigned to you.');}if(b.id==='reopen'){const result=await request(`/tickets/${t.id}/agent-reopen`,{method:'POST'});$('#status-filter').value='all';await refresh();await selectTicket(result.ticket.id);toast(result.action==='reopen'?'A new resolution cycle has started.':'Reopen window expired. A linked ticket was created.');}if(b.id==='simulate'){const body=prompt('Customer reply (visible in the public conversation):');if(body?.trim()){await mutate(`/tickets/${t.id}/customer-reply`,{body:body.trim()},{customerToken:t.customer_token});toast('Customer reply added. Any waiting clock has resumed.');}}if(b.id==='export'){const response=await fetch('/export.csv',{headers:{'X-Customer-Token':t.customer_token}});if(response.status===401)clearSession();if(!response.ok)throw new Error('Export failed');const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download=`frontdesk-${t.id}.csv`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}catch(error){handleError(error);}finally{b.disabled=false;}});
+$('#detail').addEventListener('submit',async e=>{if(e.target.id!=='reply-form')return;e.preventDefault();e.submitter.disabled=true;const draft=state.draft,mode=state.mode;try{await request(`/tickets/${state.selected}/messages`,{method:'POST',body:{body:draft,visibility:mode},idempotencyKey:state.replyKey ||= crypto.randomUUID()});state.draft='';state.replyKey=null;await refresh();toast(mode==='internal'?'Internal note added. Only your team can see it.':'Public reply sent.');}catch(error){state.draft=draft;handleError(error);}finally{e.submitter.disabled=false;}});
+if(state.token)connect().catch(handleError);else showLogin();
 // Keep SLA indicators and projected paused deadlines current without losing drafts.
 setInterval(()=>{if(state.token&&!document.hidden&&!state.draft&&!$('#create-dialog').open)refresh();},60000);
+
+// List navigation is presentation-only; native links also support opening in a new tab.
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape')document.querySelectorAll('.overflow[open]').forEach(menu=>menu.open=false);
+  if(state.selected||e.altKey||e.ctrlKey||e.metaKey||e.target.closest('input,textarea,select,dialog,[contenteditable="true"],.overflow'))return;
+  if(!['j','k'].includes(e.key))return;
+  const links=[...document.querySelectorAll('.subject a')];if(!links.length)return;
+  e.preventDefault();let index=links.indexOf(document.activeElement);index=index<0?(e.key==='j'?0:links.length-1):Math.max(0,Math.min(links.length-1,index+(e.key==='j'?1:-1)));links[index].focus();
+});
+document.addEventListener('click',e=>document.querySelectorAll('.overflow[open]').forEach(menu=>{if(!menu.contains(e.target))menu.open=false;}));

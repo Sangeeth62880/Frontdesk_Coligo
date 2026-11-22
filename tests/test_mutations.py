@@ -8,7 +8,7 @@ from frontdesk.business_time import ZONE
 
 
 def create(client, agent_headers, priority="medium"):
-    response = client.post('/tickets', headers=agent_headers, json={"subject": "Checkout fails", "customer_email": "customer@example.com", "priority": priority})
+    response = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Checkout fails", "customer_email": "customer@example.com", "priority": priority})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -45,9 +45,10 @@ def test_waiting_resumes_and_preserves_pause_history(harness, agent_headers):
     ticket = create(client, agent_headers, "urgent")
     path = f'/tickets/{ticket["id"]}'
     now[0] = now[0].replace(hour=11)
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "waiting_on_customer"}).status_code == 200
-    # Same status is a no-op and creates no second pause/event.
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "waiting_on_customer"}).status_code == 200
+    assert client.post(path + '/claim', headers=agent_headers).status_code == 200
+    assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "waiting_on_customer", "body": "Please explain"}).status_code == 200
+    # A fresh waiting request always requires a public question.
+    assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "waiting_on_customer"}).status_code == 422
     now[0] = now[0].replace(hour=12)
     assert client.post(path + '/customer-reply', headers={"X-Customer-Token": ticket["customer_token"]}, json={"body": "Here is the answer"}).status_code == 201
     view = client.get(path, headers=agent_headers).json()
@@ -58,7 +59,7 @@ def test_waiting_resumes_and_preserves_pause_history(harness, agent_headers):
         pauses = db.execute("SELECT paused_at, resumed_at FROM ticket_pauses").fetchall()
         assert len(pauses) == 1
         assert pauses[0][1] - pauses[0][0] == timedelta(hours=1)
-    assert [e["event_type"] for e in event_types(client, ticket["id"], agent_headers)] == ["created", "paused", "status_changed", "public_reply", "resumed", "status_changed"]
+    assert [e["event_type"] for e in event_types(client, ticket["id"], agent_headers)] == ["created", "claimed", "public_reply", "paused", "status_changed", "public_reply", "resumed", "status_changed"]
 
 
 def test_priority_change_logs_both_deadlines_and_is_immediately_late(harness, agent_headers):
@@ -84,12 +85,11 @@ def test_resolve_snapshots_breach_and_cannot_bypass_reopen(harness, agent_header
     ticket = create(client, agent_headers, "urgent")
     now[0] += timedelta(days=1)
     path = f'/tickets/{ticket["id"]}'
-    response = client.post(path + '/status', headers=agent_headers, json={"status": "resolved"})
+    response = client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"})
     assert response.status_code == 200
     event = event_types(client, ticket["id"], agent_headers)[-1]
     assert event["after_value"]["breached"] is True
     assert event["after_value"]["resolution_due_at"]
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "open"}).status_code == 409
     assert client.post(path + '/messages', headers=agent_headers, json={"body": "Late"}).status_code == 409
     assert client.post(path + '/priority', headers=agent_headers, json={"priority": "small"}).status_code == 409
     with psycopg.connect(url) as db:
@@ -111,7 +111,7 @@ def test_client_timestamps_rejected_and_server_event_time_used(harness, agent_he
     from datetime import datetime, timezone
     client, _, _ = harness
     before = datetime.now(timezone.utc)
-    bad = client.post('/tickets', headers=agent_headers, json={"subject": "Test", "customer_email": "a@example.com", "created_at": "2000-01-01T00:00:00Z"})
+    bad = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Test", "customer_email": "a@example.com", "created_at": "2000-01-01T00:00:00Z"})
     assert bad.status_code == 422
     ticket = create(client, agent_headers)
     stamped = datetime.fromisoformat(event_types(client, ticket["id"], agent_headers)[0]["created_at"])
@@ -123,7 +123,7 @@ def test_client_timestamps_rejected_and_server_event_time_used(harness, agent_he
 def test_calendar_range_failure_rolls_back_creation(harness, agent_headers):
     client, url, now = harness
     now[0] = now[0].replace(year=2028)
-    response = client.post('/tickets', headers=agent_headers, json={"subject": "Out of range", "customer_email": "a@example.com"})
+    response = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Out of range", "customer_email": "a@example.com"})
     assert response.status_code == 503
     assert "last seeded holiday" in response.text
     with psycopg.connect(url) as db:

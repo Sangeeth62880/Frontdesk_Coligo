@@ -4,8 +4,10 @@ from psycopg.types.json import Jsonb
 
 # Each event permits only its defined metadata keys, never arbitrary request data.
 PAYLOAD_FIELDS = {
-    'created': {'priority', 'cycle_number', 'previous_ticket_id', 'resolution_due_at'},
+    'created': {'source', 'priority', 'cycle_number', 'previous_ticket_id', 'resolution_due_at'},
     'claimed': {'assignee_id'},
+    'reassigned': {'assignee_id'},
+    'linked_ticket_created': {'previous_ticket_id'},
     'public_reply': {'message_id', 'first_replied_at'},
     'internal_note_added': {'note_id'},
     'status_changed': {'status', 'cycle_number', 'resolution_due_at', 'breached'},

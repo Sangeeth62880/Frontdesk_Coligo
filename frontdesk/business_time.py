@@ -106,6 +106,8 @@ def deadlines(calendar: Calendar, start: datetime, policy: Policy,
     that start after a deadline cannot retroactively erase an existing breach.
     """
     start = local(start)
+    if now is not None:
+        now = local(now)
     first = calendar.add(start, policy.first_reply_minutes)
     remaining = policy.resolve_minutes
     if remaining is None:
@@ -137,7 +139,8 @@ def deadlines(calendar: Calendar, start: datetime, policy: Policy,
 
 
 def can_reopen(calendar: Calendar, resolved_at: datetime, now: datetime) -> bool:
-    return local(resolved_at) <= local(now) <= calendar.add(resolved_at, 5 * 9 * 60)
+    resolved_at, now = local(resolved_at), local(now)
+    return resolved_at <= now and calendar.minutes(resolved_at, now) <= 5 * 9 * 60
 
 
 def should_auto_close(calendar: Calendar, waiting_since: datetime, now: datetime) -> bool:

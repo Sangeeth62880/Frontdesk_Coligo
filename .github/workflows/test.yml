@@ -23,9 +23,11 @@ jobs:
           version: "0.13.1"
           python-version: "3.12"
       - run: uv sync --locked
-      - run: uv run pytest -q
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - run: uv run python -m scripts.verify
       - run: node --check frontdesk/static/app.js
       - run: node --check frontdesk/static/customer.js
+      - name: Build deployment image
+        run: docker build --tag frontdesk:ci .

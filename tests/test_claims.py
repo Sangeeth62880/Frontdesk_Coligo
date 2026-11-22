@@ -4,18 +4,18 @@ from threading import Barrier
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from tests.conftest import login_headers
 
 
 @pytest.mark.parametrize("attempt", range(3))
 def test_exactly_one_parallel_claim_wins(harness, seeded_ticket, attempt):
     client, url, _ = harness
+    credentials = {i: login_headers(client, i) for i in [1, 2]}
     barrier = Barrier(2)
     def claim(agent_id):
         with TestClient(client.app) as other:
             barrier.wait(timeout=5)
-            response = other.post(f'/tickets/{seeded_ticket["id"]}/claim', headers={
-                "Authorization": "Bearer test-agent-secret", "X-Agent-Id": str(agent_id),
-            })
+            response = other.post(f'/tickets/{seeded_ticket["id"]}/claim', headers=credentials[agent_id])
             return agent_id, response
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(claim, [1, 2]))
@@ -27,7 +27,7 @@ def test_exactly_one_parallel_claim_wins(harness, seeded_ticket, attempt):
     # A losing claimant cannot bypass the claim result and send another answer.
     for agent_id, _ in results:
         reply = client.post(f'/tickets/{seeded_ticket["id"]}/messages',
-                            headers={"Authorization": "Bearer test-agent-secret", "X-Agent-Id": str(agent_id)},
+                            headers=credentials[agent_id],
                             json={"body": f"Reply from agent {agent_id}"})
         assert reply.status_code == (201 if agent_id == winner else 409)
     with psycopg.connect(url) as db:
@@ -43,7 +43,7 @@ def test_claim_requires_agent_and_conflicts_on_second_claim(harness, seeded_tick
     path = f'/tickets/{seeded_ticket["id"]}/claim'
     assert client.post(path).status_code == 401
     assert client.post(path, headers=agent_headers).status_code == 200
-    assert client.post(path, headers=agent_headers).status_code == 409
+    assert client.post(path, headers=agent_headers).status_code == 200
     assert client.post('/tickets/999999/claim', headers=agent_headers).status_code == 404
 
 

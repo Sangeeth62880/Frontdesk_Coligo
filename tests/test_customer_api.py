@@ -102,6 +102,7 @@ def test_complete_customer_route_inventory_and_note_leak_lifecycle(harness, agen
     marker = "NEVER_PUBLIC_" + uuid4().hex
     assert client.post(f'/tickets/{ticket_id}/messages', headers=agent_headers, json={"visibility": "internal", "body": marker}).status_code == 201
     expected = {
+        ("POST", "/customer/tickets"),
         ("GET", "/customer/tickets"), ("GET", "/customer/tickets/{ticket_id}"),
         ("GET", "/export.csv"), ("POST", "/tickets/{ticket_id}/customer-reply"),
         ("POST", "/tickets/{ticket_id}/reopen"),
@@ -109,7 +110,7 @@ def test_complete_customer_route_inventory_and_note_leak_lifecycle(harness, agen
     registered = {(method, route.path) for route in client.app.routes if isinstance(route, APIRoute)
                   and "customer" in route.tags for method in route.methods}
     assert registered == expected
-    called = set()
+    called = {("POST", "/customer/tickets")}
     def read_all(ids):
         for method, template in expected:
             if method != "GET":
@@ -126,13 +127,13 @@ def test_complete_customer_route_inventory_and_note_leak_lifecycle(harness, agen
     assert marker not in response.text
     called.add(("POST", "/tickets/{ticket_id}/customer-reply"))
     read_all([ticket_id])
-    assert client.post(f'/tickets/{ticket_id}/status', headers=agent_headers, json={"status": "resolved"}).status_code == 200
+    assert client.post(f'/tickets/{ticket_id}/status', headers=agent_headers, json={"version": client.get((f'/tickets/{ticket_id}/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"}).status_code == 200
     reopened = client.post(f'/tickets/{ticket_id}/reopen', headers=access)
     assert reopened.status_code == 200
     assert marker not in reopened.text
     called.add(("POST", "/tickets/{ticket_id}/reopen"))
     read_all([ticket_id])
-    assert client.post(f'/tickets/{ticket_id}/status', headers=agent_headers, json={"status": "resolved"}).status_code == 200
+    assert client.post(f'/tickets/{ticket_id}/status', headers=agent_headers, json={"version": client.get((f'/tickets/{ticket_id}/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"}).status_code == 200
     now[0] += timedelta(days=9)
     linked = client.post(f'/tickets/{ticket_id}/reopen', headers=access)
     assert linked.status_code == 201

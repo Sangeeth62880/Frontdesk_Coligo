@@ -6,12 +6,19 @@ import psycopg
 from psycopg.rows import dict_row
 
 from frontdesk import service
+from frontdesk.auth import hash_password
 from frontdesk.business_time import ZONE
 from frontdesk.events import log_event
 
 
 def seed(db):
     db.execute("SELECT pg_advisory_xact_lock(7220261122)")
+    if os.environ.get("FRONTDESK_SEED_DEMO", "false").lower() == "true":
+        password = os.environ.get("FRONTDESK_DEMO_PASSWORD")
+        if not password:
+            raise ValueError("FRONTDESK_DEMO_PASSWORD is required in demo mode")
+        for email in ["meera@arvo.example", "arun@arvo.example", "divya@arvo.example"]:
+            db.execute("UPDATE agents SET password_hash=%s WHERE email=%s AND password_hash IS NULL", (hash_password(password), email))
     existing = db.execute("SELECT id FROM tickets WHERE customer_email LIKE 'demo-%@arvo.example' ORDER BY id").fetchall()
     if existing:
         return [row["id"] for row in existing]

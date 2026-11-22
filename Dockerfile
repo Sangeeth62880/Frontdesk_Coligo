@@ -11,4 +11,5 @@ RUN useradd --create-home --uid 10001 frontdesk && chown -R frontdesk:frontdesk 
 USER frontdesk
 ENV PATH="/app/.venv/bin:$PATH" PORT=8000
 EXPOSE 8000
+# Startup migrates and provisions demo credentials before dropping DB privileges.
 CMD ["python", "-m", "scripts.start"]

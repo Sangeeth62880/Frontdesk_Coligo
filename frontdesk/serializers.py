@@ -7,6 +7,11 @@ TICKET_FIELDS = (
     "id", "subject", "priority", "status", "created_at", "start_at",
     "first_replied_at", "resolved_at", "closed_at", "previous_ticket_id",
 )
+# Every ticket model column must be explicitly classified by the schema contract test.
+PRIVATE_TICKET_FIELDS = {
+    "customer_email", "assignee_id", "customer_token", "first_reply_required",
+    "first_reply_due_at", "first_reply_breached", "resolution_breached", "version",
+}
 MESSAGE_FIELDS = ("id", "author_type", "body", "created_at")
 CSV_FIELDS = ("id", "subject", "priority", "status", "created_at", "previous_ticket_id")
 

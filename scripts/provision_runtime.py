@@ -15,15 +15,17 @@ def provision(admin_url, password, role='frontdesk_app'):
         db.execute(sql.SQL(statement).format(sql.Identifier(role), sql.Literal(password)))
         name = db.execute('SELECT current_database()').fetchone()[0]
         db.execute(sql.SQL('GRANT CONNECT ON DATABASE {} TO {}').format(sql.Identifier(name), sql.Identifier(role)))
-        db.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
+        schema = db.execute('SELECT current_schema()').fetchone()[0]
+        db.execute(sql.SQL('GRANT USAGE ON SCHEMA {} TO {}').format(sql.Identifier(schema), sql.Identifier(role)))
         for table in ['agents', 'holidays', 'sla_policies']:
             db.execute(sql.SQL('GRANT SELECT ON {} TO {}').format(sql.Identifier(table), sql.Identifier(role)))
-        for table in ['tickets', 'ticket_pauses', 'resolution_cycles']:
+        for table in ['tickets', 'ticket_pauses', 'resolution_cycles', 'request_idempotency', 'agent_sessions', 'agent_login_attempts']:
             db.execute(sql.SQL('GRANT SELECT, INSERT, UPDATE ON {} TO {}').format(sql.Identifier(table), sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT DELETE ON agent_login_attempts TO {}').format(sql.Identifier(role)))
         for table in ['public_messages', 'internal_notes', 'events']:
             db.execute(sql.SQL('GRANT SELECT, INSERT ON {} TO {}').format(sql.Identifier(table), sql.Identifier(role)))
         db.execute(sql.SQL('REVOKE UPDATE, DELETE, TRUNCATE ON events FROM {}').format(sql.Identifier(role)))
-        db.execute(sql.SQL('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {}').format(sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {} TO {}').format(sql.Identifier(schema), sql.Identifier(role)))
     values = conninfo_to_dict(admin_url)
     values.update(user=role, password=password)
     return make_conninfo(**values)

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from frontdesk.api import create_app
+from frontdesk.auth import hash_password
 from frontdesk.business_time import ZONE
 from datetime import datetime
 
@@ -27,6 +28,8 @@ def api_db():
             with psycopg.connect(isolated) as db:
                 for migration in sorted((Path(__file__).resolve().parents[1] / "migrations").glob("*.sql")):
                     db.execute(migration.read_text())
+            with psycopg.connect(isolated) as db:
+                db.execute("UPDATE agents SET password_hash=%s", (hash_password(TEST_PASSWORD),))
             yield isolated
         finally:
             admin.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(schema)))
@@ -35,7 +38,7 @@ def api_db():
 @pytest.fixture
 def harness(api_db):
     now = [datetime(2026, 11, 23, 10, tzinfo=ZONE)]
-    app = create_app(api_db, agent_token="test-agent-secret", sweep_token="test-sweep-secret", clock=lambda: now[0], sweep_interval=0)
+    app = create_app(api_db, sweep_token="test-sweep-secret", clock=lambda: now[0], sweep_interval=0, auth_clock=lambda: datetime(2026, 11, 23, 10, tzinfo=ZONE))
     with TestClient(app) as client:
         yield client, api_db, now
 
@@ -49,5 +52,15 @@ def seeded_ticket(api_db):
 
 
 @pytest.fixture
-def agent_headers():
-    return {"Authorization": "Bearer test-agent-secret", "X-Agent-Id": "1"}
+def agent_headers(harness):
+    return login_headers(harness[0], 1)
+
+
+TEST_PASSWORD = "test-password-Private-482!"
+AGENT_NAMES = ['Meera', 'Arun', 'Divya', 'Nikhil', 'Anjali', 'Rahul', 'Priya', 'Vivek', 'Sneha']
+
+
+def login_headers(client, agent_id):
+    response = client.post('/auth/login', json={'email': AGENT_NAMES[agent_id-1].lower()+'@arvo.example', 'password': TEST_PASSWORD})
+    assert response.status_code == 200, response.text
+    return {'Authorization': 'Bearer '+response.json()['token']}

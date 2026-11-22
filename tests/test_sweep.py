@@ -12,7 +12,8 @@ SWEEP = {"Authorization": "Bearer test-sweep-secret"}
 
 
 def wait(client, ticket, agent_headers):
-    result = client.post(f'/tickets/{ticket["id"]}/status', headers=agent_headers, json={"status": "waiting_on_customer"})
+    assert client.post(f'/tickets/{ticket["id"]}/claim', headers=agent_headers).status_code == 200
+    result = client.post(f'/tickets/{ticket["id"]}/status', headers=agent_headers, json={"version": client.get((f'/tickets/{ticket["id"]}/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "waiting_on_customer", "body": "Please reply"})
     assert result.status_code == 200
 
 

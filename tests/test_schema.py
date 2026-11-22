@@ -68,3 +68,24 @@ def test_holidays_extended_to_2027(db):
     assert rows["2027-01-26"] == "Republic Day"
     assert rows["2027-12-25"] == "Christmas"
     assert db.execute("SELECT count(*) FROM holidays WHERE day BETWEEN '2026-01-01' AND '2026-12-31'").fetchone()[0] == 22
+
+
+def test_upgrade_preserves_creation_source_and_recorded_breach(db):
+    # Exercise migration 006 on genuinely pre-hardening records.
+    from psycopg import sql
+    schema='upgrade_'+uuid4().hex
+    db.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+    db.execute(sql.SQL('SET LOCAL search_path TO {}').format(sql.Identifier(schema)))
+    migrations=Path(__file__).resolve().parents[1]/'migrations'
+    for path in sorted(migrations.glob('*.sql')):
+        if path.name>='006':continue
+        db.execute(path.read_text())
+    ids=[]
+    for actor in ['agent:1','customer']:
+        tid=db.execute("INSERT INTO tickets(subject,customer_email,priority,start_at) VALUES ('Legacy','a@example.com','urgent','2026-11-20 10:00+05:30') RETURNING id").fetchone()[0]
+        db.execute("INSERT INTO events(ticket_id,actor,event_type) VALUES (%s,%s,'created')",(tid,actor))
+        db.execute("INSERT INTO resolution_cycles(ticket_id,cycle_number,opened_at,start_at,ended_at,resolution_due_at,breached) VALUES (%s,1,'2026-11-20 10:00+05:30','2026-11-20 10:00+05:30','2026-11-23 10:00+05:30','2026-11-20 18:30+05:30',true)",(tid,))
+        ids.append(tid)
+    db.execute((migrations/'006_hardening.sql').read_text())
+    assert db.execute('SELECT first_reply_required,first_reply_due_at,resolution_breached FROM tickets ORDER BY id').fetchall()==[(False,None,True),(True,None,True)]
+    assert db.execute('SELECT count(*) FROM events').fetchone()[0]==2

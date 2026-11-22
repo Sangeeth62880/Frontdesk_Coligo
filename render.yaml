@@ -12,7 +12,7 @@ services:
           property: connectionString
       - key: FRONTDESK_DB_PASSWORD
         generateValue: true
-      - key: FRONTDESK_AGENT_TOKEN
+      - key: FRONTDESK_DEMO_PASSWORD
         generateValue: true
       - key: FRONTDESK_SWEEP_TOKEN
         generateValue: true

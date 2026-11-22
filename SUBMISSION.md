@@ -3,13 +3,13 @@
 Status: application implemented and verified locally; publication pending account access.
 
 - Live URL: pending deployment.
-- Repository URL: pending repository publication.
+- Repository URL: https://github.com/Sangeeth62880/Frontdesk_Coligo.
 - Local run instructions and decisions: [README.md](README.md).
-- Access: the deployment administrator supplies the team demo key separately. Select any of the nine seeded agents after entering it. Demo tickets belong to Meera, with one unassigned ticket.
+- Access: sign in with meera@arvo.example, arun@arvo.example or divya@arvo.example and the configured FRONTDESK_DEMO_PASSWORD in demo mode. The other six agents require administrator password provisioning. Demo tickets belong to Meera, with one unassigned ticket.
 
 ## What I did not finish, and why
 
-I used a shared team key and a seeded agent picker rather than implementing individual accounts, password recovery or roles. I prioritized working-time SLAs, safe ticket ownership, private-note isolation and a permanent audit trail. Before production, I would replace demo access with individual authentication and introduce customer-link expiry and rotation.
+Individual agent authentication is implemented with salted scrypt password hashes and hashed bearer sessions, a fixed 12-hour lifetime, logout revocation and database-backed login throttling. Acting identity comes from the session. Password reset, password change UI, MFA, SSO, per-customer login and session listing remain unimplemented. Customer-capability expiry, rotation and delivery also remain unfinished.
 
 I did not add pagination, a connection pool, email delivery or audit hash chaining. The fictional team's volume is small and these were lower priority than the required workflows and incident protections. Existing events are protected by database triggers; the deployment bootstrap also restricts the application's database privileges.
 
@@ -17,12 +17,14 @@ The UI, customer-safe view, demo seed, automatic sweep worker, container definit
 
 ## Verification checkpoint
 
-- PostgreSQL regression suite: 75 tests passed, none skipped.
+- PostgreSQL hardening and authentication proof: see output/auth-step-7.txt for the final full-suite result, with no skipped coverage; run `TEST_DATABASE_URL=… uv run python -m scripts.verify`.
+- Phases 0–5, requirement-to-test mapping, corrected Friday reply arithmetic, and all test assumptions are recorded in README. No Phase 0 decision deviations.
+- HTML smoke and login lifecycle checks execute shipped JavaScript with Node DOM/network sinks; no new real-browser/Playwright or hosted pass was performed.
 - JavaScript syntax checks passed.
-- Local browser: create, two-agent claim conflict, public reply, internal note, wait/resume, priority change, resolve, customer reopen and timeline verified.
+- Earlier local browser baseline (before hardening): create, two-agent claim conflict, public reply, internal note, wait/resume, priority change, resolve, customer reopen and timeline verified.
 - Customer page excludes the private browser-test marker; API tests also cover all customer endpoints and event payloads.
 - CSV payload verified by API tests. Native download completion was not confirmed by the in-app browser's download-event bridge.
 - Agent and customer layouts inspected at a 390px viewport; no horizontal overflow.
 - Runtime role has no superuser/create-database/create-role privileges and no UPDATE/DELETE permissions on events.
 
-Before sending: fill the two URLs, repeat the manual browser pass on the deployed application, share the demo key with the reviewer, update this note to match the final state, and record the hosting expiration date. This note was drafted with Codex and should be reviewed by Sangeeth.
+Before sending: fill the two URLs, repeat the manual browser pass on the deployed application, share the demo login emails and configured password with the reviewer, update this note to match the final state, and record the hosting expiration date. This note was drafted with Codex and should be reviewed by Sangeeth.

@@ -14,7 +14,7 @@ def reopen_at(harness, agent_headers, minutes):
     # Resolve after its urgent end-of-day deadline to preserve a real breach.
     now[0] += timedelta(days=1)
     path = f'/tickets/{ticket["id"]}'
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "resolved"}).status_code == 200
+    assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"}).status_code == 200
     with psycopg.connect(url) as db:
         calendar = Calendar(frozenset(row[0] for row in db.execute("SELECT day FROM holidays")))
     now[0] = calendar.add(now[0], minutes)
@@ -34,8 +34,8 @@ def test_exact_2700_reopens_new_cycle_preserving_breach_event(harness, agent_hea
     assert body["action"] == "reopen"
     assert body["ticket"]["id"] == ticket["id"]
     assert body["sla"]["cycle_number"] == 2
-    assert body["sla"]["resolution_breached"] is False
-    assert body["sla"]["is_late"] is False
+    assert body["sla"]["resolution_breached"] is True
+    assert body["sla"]["is_late"] is True
     assert datetime.fromisoformat(body["sla"]["resolution_due_at"]) > now[0]
     new_events = event_types(client, ticket["id"], agent_headers)
     assert new_events[:-1] == old_events
@@ -72,9 +72,9 @@ def test_reopen_does_not_reset_first_reply_or_use_old_pauses(harness, agent_head
     path = f'/tickets/{ticket["id"]}'
     assert client.post(path + "/claim", headers=agent_headers).status_code == 200
     assert client.post(path + '/messages', headers=agent_headers, json={"body": "First reply"}).status_code == 201
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "waiting_on_customer"}).status_code == 200
+    assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "waiting_on_customer", "body": "Please reply"}).status_code == 200
     now[0] += timedelta(hours=1)
-    assert client.post(path + '/status', headers=agent_headers, json={"status": "resolved"}).status_code == 200
+    assert client.post(path + '/status', headers=agent_headers, json={"version": client.get((path + '/status').removesuffix("/status"), headers=agent_headers).json().get("version", 0), "status": "resolved"}).status_code == 200
     replied = client.get(path, headers=agent_headers).json()["first_replied_at"]
     now[0] += timedelta(hours=1)
     response = client.post(path + '/reopen', headers={"X-Customer-Token": ticket["customer_token"]})
