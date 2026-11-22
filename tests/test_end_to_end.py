@@ -1,5 +1,5 @@
 from tests.conftest import login_headers
-"""One deterministic, freshly migrated PostgreSQL scenario for the whole brief."""
+"""One deterministic, freshly migrated PostgreSQL scenario for the ticket lifecycle."""
 from datetime import datetime, timedelta
 import json
 import psycopg

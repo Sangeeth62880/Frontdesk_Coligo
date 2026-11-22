@@ -35,4 +35,4 @@ FROM (VALUES
 ('2027-09-12', 'Thiruvonam'), ('2027-10-09', 'Mahanavami'), ('2027-10-10', 'Vijayadasami')
 ) AS verified(day, name);
 INSERT INTO holidays(day, name, source) VALUES
-('2027-01-01', 'New Year - company holiday', 'User-requested company holiday; NOT verified in GAD');
+('2027-01-01', 'New Year - company holiday', 'Company holiday assumed by the author; not in the GAD list');

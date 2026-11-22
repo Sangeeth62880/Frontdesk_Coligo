@@ -8,3 +8,11 @@ tests
 *.md
 output
 node_modules
+
+# Keep local secrets, workflow metadata and documentation out of the build context.
+.env.*
+!.env.example
+.github
+docs
+.DS_Store
+*.py[cod]
