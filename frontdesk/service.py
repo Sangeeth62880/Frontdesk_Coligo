@@ -25,31 +25,59 @@ def cycle_for(db, ticket_id):
     return row
 
 
-def sla(db, ticket, now):
+def load_sla_context(db, tickets):
+    """Prefetch the calendar and histories after the caller locks its ticket rows."""
+    ids = [ticket["id"] for ticket in tickets]
+    calendar = Calendar(frozenset(row["day"] for row in db.execute("SELECT day FROM holidays")))
+    policies = {row["priority"]: Policy(row["first_reply_minutes"], row["resolve_minutes"]) for row in db.execute("SELECT * FROM sla_policies")}
+    histories = db.execute("SELECT * FROM resolution_cycles WHERE ticket_id = ANY(%s) ORDER BY cycle_number", (ids,)).fetchall()
+    latest = {}
+    initial = {}
+    for cycle in histories:
+        latest[cycle["ticket_id"]] = cycle
+        if cycle["cycle_number"] == 1:
+            initial[cycle["ticket_id"]] = cycle
+    pauses: dict[int, list[Pause]] = {}
+    for row in db.execute("SELECT * FROM ticket_pauses WHERE ticket_id = ANY(%s) ORDER BY paused_at", (ids,)):
+        pauses.setdefault(row["cycle_id"], []).append(Pause(row["paused_at"], row["resumed_at"]))
+    return {"calendar": calendar, "policies": policies, "latest": latest, "initial": initial, "pauses": pauses}
+
+
+def sla(db, ticket, now, *, context=None):
     now = local(now)
-    ticket = locked_ticket(db, ticket["id"])
-    calendar, policy = calendar_and_policy(db, ticket["priority"])
-    cycle = cycle_for(db, ticket["id"])
-    pauses = [Pause(row["paused_at"], row["resumed_at"]) for row in db.execute(
-        "SELECT paused_at, resumed_at FROM ticket_pauses WHERE cycle_id = %s ORDER BY paused_at", (cycle["id"],))]
+    if context is None:
+        ticket = locked_ticket(db, ticket["id"])
+        calendar, policy = calendar_and_policy(db, ticket["priority"])
+        cycle = cycle_for(db, ticket["id"])
+        pauses = [Pause(row["paused_at"], row["resumed_at"]) for row in db.execute(
+            "SELECT paused_at, resumed_at FROM ticket_pauses WHERE cycle_id = %s ORDER BY paused_at", (cycle["id"],))]
+        initial = db.execute("SELECT ended_at FROM resolution_cycles WHERE ticket_id = %s AND cycle_number = 1", (ticket["id"],)).fetchone()
+    else:
+        # The list query already holds these exact rows FOR UPDATE.
+        calendar, policy = context["calendar"], context["policies"][ticket["priority"]]
+        cycle = context["latest"].get(ticket["id"])
+        if cycle is None:
+            raise HTTPException(409, "Ticket has no resolution cycle; run the migrations")
+        pauses = context["pauses"].get(cycle["id"], [])
+        initial = context["initial"][ticket["id"]]
     resolution_due = deadlines(calendar, cycle["start_at"], policy, pauses, now)[1]
     if cycle["ended_at"] is not None and cycle["resolution_due_at"] is not None:
         resolution_due = cycle["resolution_due_at"]
     checked_at = cycle["ended_at"] or now
     reply_due = calendar.add(ticket["start_at"], policy.first_reply_minutes) if ticket["first_reply_required"] else None
     # Completion freezes both obligations. History and prior priority breaches stick.
-    initial = db.execute("SELECT ended_at FROM resolution_cycles WHERE ticket_id = %s AND cycle_number = 1", (ticket["id"],)).fetchone()
     reply_checked = min(value for value in (ticket["first_replied_at"], initial["ended_at"], now) if value is not None)
     reply_breached = bool(reply_due and reply_checked > reply_due)
     resolution_breached = bool(cycle["breached"] or checked_at > resolution_due)
-    if cycle["ended_at"] is None:
+    if cycle["ended_at"] is None and cycle["breached"] != resolution_breached:
         db.execute("UPDATE resolution_cycles SET breached = %s WHERE id = %s", (resolution_breached, cycle["id"]))
-    flags = db.execute("""UPDATE tickets SET
-        first_reply_breached = first_reply_breached OR %s,
-        resolution_breached = resolution_breached OR %s,
-        first_reply_due_at = %s WHERE id = %s
-        RETURNING first_reply_breached, resolution_breached""",
-        (reply_breached, resolution_breached, reply_due, ticket["id"])).fetchone()
+    flags = {"first_reply_breached": ticket["first_reply_breached"] or reply_breached,
+             "resolution_breached": ticket["resolution_breached"] or resolution_breached}
+    if (ticket["first_reply_due_at"] != reply_due or
+            any(ticket[key] != value for key, value in flags.items())):
+        db.execute("""UPDATE tickets SET first_reply_breached=%s,
+            resolution_breached=%s, first_reply_due_at=%s WHERE id=%s""",
+            (flags["first_reply_breached"], flags["resolution_breached"], reply_due, ticket["id"]))
     return {"first_reply_due_at": reply_due, "resolution_due_at": resolution_due,
             "cycle_number": cycle["cycle_number"], "cycle_resolution_breached": resolution_breached, **flags,
             "breached_targets": [name for name in ("first_reply", "resolution") if flags[name + "_breached"]],

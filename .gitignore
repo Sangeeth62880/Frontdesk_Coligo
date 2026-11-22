@@ -11,3 +11,7 @@ output/
 .DS_Store
 node_modules/
 *.py[cod]
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+test-results/

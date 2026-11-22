@@ -1,34 +1,50 @@
 """Transactional Frontdesk API. Customer capabilities and agent auth are separate."""
-import os
-import secrets
 import hashlib
+import html
 import json
 import logging
-import html
-from datetime import datetime, timedelta, timezone
-from frontdesk.auth import verify_password, token_hash
-from pathlib import Path
+import os
+import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
 import psycopg
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Path as ApiPath
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import PlainTextResponse, JSONResponse, FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from frontdesk.scheduler import Sweeper
-from frontdesk import service
-from frontdesk.business_time import CalendarRangeError, local
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from frontdesk import service
+from frontdesk.auth import token_hash, verify_password
+from frontdesk.business_time import CalendarRangeError, local
 from frontdesk.events import log_event
+from frontdesk.http import RequestSafety
+from frontdesk.scheduler import Sweeper
 from frontdesk.serializers import customer_csv, customer_ticket
 
 
-class NoteInput(BaseModel):
+class SafeInput(BaseModel):
+    @field_validator("*", mode="after")
+    @classmethod
+    def no_nulls(cls, value):
+        if isinstance(value, str) and "\x00" in value:
+            raise ValueError("Null characters are not permitted")
+        return value
+
+
+class NoteInput(SafeInput):
     model_config = ConfigDict(extra="forbid")
     body: str = Field(min_length=1, max_length=10000)
 
@@ -40,7 +56,7 @@ class NoteInput(BaseModel):
         return value
 
 
-class TicketInput(BaseModel):
+class TicketInput(SafeInput):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     subject: str = Field(min_length=1, max_length=300)
     customer_email: str = Field(min_length=3, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -55,7 +71,7 @@ class MessageInput(NoteInput):
     visibility: Literal["public", "internal"] = "public"
 
 
-class StatusInput(BaseModel):
+class StatusInput(SafeInput):
     model_config = ConfigDict(extra="forbid")
     status: Literal["open", "waiting_on_customer", "resolved", "closed"]
     body: str | None = Field(default=None, min_length=1, max_length=10000)
@@ -69,7 +85,7 @@ class PriorityInput(BaseModel):
 
 class ReassignInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    assignee_id: int
+    assignee_id: int = Field(ge=1, le=9223372036854775807)
 
 
 def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=None, auth_clock=None):
@@ -91,6 +107,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
 
     app = FastAPI(title="Frontdesk", version="0.1.0", lifespan=lifespan)
     static = Path(__file__).parent / "static"
+    app.add_middleware(RequestSafety, max_bytes=int(os.environ.get("FRONTDESK_MAX_BODY_BYTES", "65536")))
     app.mount("/static", StaticFiles(directory=static), name="static")
 
     @app.middleware("http")
@@ -99,6 +116,8 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Frame-Options"] = "DENY"
+        if os.environ.get("RENDER") or request.url.scheme == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
         if request.url.path not in ("/docs", "/redoc"):
             response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'"
         if not request.url.path.startswith("/static/"):
@@ -127,13 +146,22 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         # Fixed public shell only: no agent state, notes or tokens are embedded.
         return FileResponse(static / "customer.html")
 
+    @app.exception_handler(psycopg.Error)
+    async def database_unavailable(request, exc):
+        logging.getLogger("frontdesk.database").error(json.dumps({
+            "event": "database_unavailable", "request_id": request.state.request_id,
+            "error_type": type(exc).__name__,
+        }))
+        return JSONResponse(status_code=503, content={"detail": "Database temporarily unavailable"}, headers={"Retry-After": "5"})
+
     def connection():
         if not database_url:
             raise HTTPException(503, "DATABASE_URL is not configured")
-        with psycopg.connect(database_url, row_factory=dict_row) as db:
+        with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=5) as db:
+            db.execute("SELECT set_config('statement_timeout', %s, true)", (os.environ.get("FRONTDESK_STATEMENT_TIMEOUT_MS", "10000"),))
             yield db
 
-    DB = Annotated[psycopg.Connection, Depends(connection, scope="function")]
+    DB = Annotated[psycopg.Connection[dict], Depends(connection, scope="function")]
 
     @app.get("/health", include_in_schema=False)
     def health(db: DB):
@@ -149,9 +177,9 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
 
     def auth_now():
         source = auth_clock or clock
-        return source() if source else datetime.now(timezone.utc)
+        return source() if source else datetime.now(UTC)
 
-    class LoginInput(BaseModel):
+    class LoginInput(SafeInput):
         model_config = ConfigDict(extra="forbid")
         email: str = Field(max_length=320)
         password: str = Field(max_length=1024)
@@ -207,7 +235,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         db.execute("UPDATE agent_sessions SET revoked_at=%s WHERE token_hash=%s", (auth_now(), token_hash(authorization[7:])))
         return {"ok": True}
 
-    Agent = SessionAgent
+    Agent = Annotated[dict, Depends(session_agent)]
 
     def ticket_for_customer(db, ticket_id, token):
         row = db.execute("SELECT * FROM tickets WHERE id = %s AND customer_token = %s", (ticket_id, token)).fetchone()
@@ -221,7 +249,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return [customer_ticket(row) for row in rows]
 
     @app.get("/customer/tickets/{ticket_id}", tags=["customer"])
-    def customer_view(ticket_id: int, db: DB, token: Customer):
+    def customer_view(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, token: Customer):
         ticket = ticket_for_customer(db, ticket_id, token)
         messages = db.execute("SELECT id, author_type, body, created_at FROM public_messages WHERE ticket_id = %s ORDER BY created_at, id", (ticket_id,)).fetchall()
         return customer_ticket(ticket, messages)
@@ -232,11 +260,11 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return PlainTextResponse(customer_csv(rows), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
     @app.post("/tickets/{ticket_id}/notes", status_code=201)
-    def note(ticket_id: int, data: NoteInput, db: DB, actor: Agent):
+    def note(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: NoteInput, db: DB, actor: Agent):
         return service.add_note(db, ticket_id, data.body, actor["id"])
 
     @app.post("/tickets/{ticket_id}/claim")
-    def claim(ticket_id: int, db: DB, actor: Agent):
+    def claim(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, actor: Agent):
         # Atomic compare-and-set. Never pre-read the assignee before this write.
         won = db.execute(
             "UPDATE tickets SET assignee_id = %s WHERE id = %s AND assignee_id IS NULL AND status IN ('open', 'waiting_on_customer') RETURNING id, assignee_id",
@@ -269,38 +297,64 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return {**customer_ticket(ticket), "customer_token": str(ticket["customer_token"])}
 
     @app.post("/customer/tickets", status_code=201, tags=["customer"])
-    def customer_create(data: TicketInput, db: DB):
+    def customer_create(data: TicketInput, request: Request, db: DB):
+        # Uvicorn alone resolves trusted proxies. Never trust an arbitrary header here.
+        client = request.client.host if request.client else "unknown"
+        client_hash = hashlib.sha256(client.encode()).hexdigest()
+        instant = auth_now()
+        db.execute("DELETE FROM customer_intake_limits WHERE window_start < %s", (instant - timedelta(minutes=10),))
+        row = db.execute("""INSERT INTO customer_intake_limits(client_hash, window_start, attempts)
+            VALUES (%s,%s,1) ON CONFLICT (client_hash) DO UPDATE
+            SET attempts=customer_intake_limits.attempts+1 RETURNING window_start, attempts""",
+            (client_hash, instant)).fetchone()
+        assert row is not None
+        if row["attempts"] > int(os.environ.get("FRONTDESK_INTAKE_LIMIT", "10")):
+            retry = max(1, int((row["window_start"] + timedelta(minutes=10) - instant).total_seconds()))
+            return JSONResponse(status_code=429, content={"detail": "Too many tickets. Try again later."}, headers={"Retry-After": str(retry)})
         ticket = service.create_ticket(db, data.subject, data.customer_email, data.priority, now(db), "customer")
         return {**customer_ticket(ticket), "customer_token": str(ticket["customer_token"])}
 
-    def sla_view(db, ticket):
-        targets = service.sla(db, ticket, now(db))
+    def sla_view(db, ticket, context=None, instant=None):
+        targets = service.sla(db, ticket, instant if instant is not None else now(db), context=context)
         return {**ticket, **{key: targets[key] for key in (
             "first_reply_due_at", "first_reply_breached", "resolution_breached")}, "sla": targets}
 
-    def agent_view(db, ticket):
+    def agent_view(db, ticket, actor):
         ticket = service.locked_ticket(db, ticket["id"])
         messages = db.execute("SELECT id, author_type, agent_id, body, created_at, 'public' AS visibility FROM public_messages WHERE ticket_id = %s ORDER BY created_at, id", (ticket["id"],)).fetchall()
         notes = db.execute("SELECT id, agent_id, body, created_at, 'internal' AS visibility FROM internal_notes WHERE ticket_id = %s ORDER BY created_at, id", (ticket["id"],)).fetchall()
         first_reply = db.execute("SELECT actor, after_value->>'first_replied_at' AS at FROM events WHERE ticket_id = %s AND event_type = 'public_reply' AND actor LIKE 'agent:%%' ORDER BY id LIMIT 1", (ticket["id"],)).fetchone()
-        return {**sla_view(db, ticket), "first_reply_at": first_reply["at"] if first_reply else None, "first_reply_actor": first_reply["actor"] if first_reply else None, "messages": messages, "internal_notes": notes}
+        view = sla_view(db, ticket)
+        view.pop("customer_token", None)
+        return {**view, "first_reply_at": first_reply["at"] if first_reply else None, "first_reply_actor": first_reply["actor"] if first_reply else None, "messages": messages, "internal_notes": notes}
 
     @app.get("/tickets")
     def ticket_list(db: DB, actor: Agent, assignee: Literal["me", "all", "unassigned"] = "me"):
         where = {"me": "assignee_id = %s", "all": "true", "unassigned": "assignee_id IS NULL"}[assignee]
         rows = db.execute("SELECT * FROM tickets WHERE " + where + " ORDER BY id FOR UPDATE", (actor["id"],) if assignee == "me" else ()).fetchall()
-        result = [sla_view(db, ticket) for ticket in rows]
+        context = service.load_sla_context(db, rows)
+        instant = now(db)
+        result = [sla_view(db, ticket, context, instant) for ticket in rows]
+        for item in result:
+            item.pop("customer_token", None)
         return sorted(result, key=lambda t: (not t["sla"]["is_late"], t["id"]))
 
     @app.get("/tickets/{ticket_id}")
-    def ticket_view(ticket_id: int, db: DB, actor: Agent):
+    def ticket_view(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, actor: Agent):
         row = db.execute("SELECT * FROM tickets WHERE id = %s", (ticket_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Ticket not found")
-        return agent_view(db, row)
+        return agent_view(db, row, actor)
+
+    @app.get("/tickets/{ticket_id}/customer-access")
+    def customer_access(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, actor: Agent):
+        ticket = service.locked_ticket(db, ticket_id)
+        if ticket["assignee_id"] != actor["id"]:
+            raise HTTPException(403, "Only the current assignee can access customer actions")
+        return {"customer_token": str(ticket["customer_token"])}
 
     @app.get("/tickets/{ticket_id}/events")
-    def events(ticket_id: int, db: DB, actor: Agent):
+    def events(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, actor: Agent):
         if not db.execute("SELECT id FROM tickets WHERE id = %s", (ticket_id,)).fetchone():
             raise HTTPException(404, "Ticket not found")
         return db.execute("SELECT id, actor, event_type, before_value, after_value, created_at FROM events WHERE ticket_id = %s ORDER BY id", (ticket_id,)).fetchall()
@@ -322,7 +376,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return result
 
     @app.post("/tickets/{ticket_id}/messages", status_code=201)
-    def message(ticket_id: int, data: MessageInput, db: DB, actor: Agent,
+    def message(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: MessageInput, db: DB, actor: Agent,
                 idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
         def mutation():
             if data.visibility == "internal":
@@ -332,7 +386,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return idempotent(db, f"agent:{actor['id']}", idempotency_key, f"/tickets/{ticket_id}/messages", data, mutation)
 
     @app.post("/tickets/{ticket_id}/customer-reply", status_code=201, tags=["customer"])
-    def customer_reply(ticket_id: int, data: NoteInput, db: DB, token: Customer,
+    def customer_reply(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: NoteInput, db: DB, token: Customer,
                        idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
         ticket_for_customer(db, ticket_id, token)
         def mutation():
@@ -345,7 +399,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return idempotent(db, f"customer:{token}", idempotency_key, f"/tickets/{ticket_id}/customer-reply", data, mutation)
 
     @app.post("/tickets/{ticket_id}/status")
-    def status(ticket_id: int, data: StatusInput, db: DB, actor: Agent):
+    def status(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: StatusInput, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
         if ticket["version"] != data.version:
             raise HTTPException(409, "Ticket changed; refresh and retry with its current version")
@@ -362,25 +416,27 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return {**customer_ticket(updated), "version": updated["version"], "sla": service.sla(db, updated, now(db))}
 
     @app.post("/tickets/{ticket_id}/priority")
-    def priority(ticket_id: int, data: PriorityInput, db: DB, actor: Agent):
+    def priority(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: PriorityInput, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
         updated = service.change_priority(db, ticket, data.priority, now(db), f"agent:{actor['id']}")
         return {**customer_ticket(updated), "version": updated["version"], "sla": service.sla(db, updated, now(db))}
 
     @app.post("/tickets/{ticket_id}/agent-reopen")
-    def agent_reopen(ticket_id: int, response: Response, db: DB, actor: Agent):
+    def agent_reopen(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], response: Response, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
         action, updated = service.reopen(db, ticket, now(db), f"agent:{actor['id']}")
         response.status_code = 201 if action == "linked_new_ticket" else 200
         return {"action": action, "ticket": customer_ticket(updated), "sla": service.sla(db, updated, now(db))}
 
     @app.post("/tickets/{ticket_id}/reassign")
-    def reassign(ticket_id: int, data: ReassignInput, db: DB, actor: Agent):
+    def reassign(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], data: ReassignInput, db: DB, actor: Agent):
         ticket = service.locked_ticket(db, ticket_id)
         if ticket["status"] not in ("open", "waiting_on_customer"):
             raise HTTPException(409, "Only active tickets can be reassigned")
-        if not db.execute("SELECT id FROM agents WHERE id = %s", (data.assignee_id,)).fetchone():
-            raise HTTPException(422, "Unknown assignee")
+        if ticket["assignee_id"] != actor["id"]:
+            raise HTTPException(403, "Only the current assignee can transfer this ticket")
+        if not db.execute("SELECT id FROM agents WHERE id = %s AND is_active", (data.assignee_id,)).fetchone():
+            raise HTTPException(422, "Unknown or inactive assignee")
         if ticket["assignee_id"] != data.assignee_id:
             db.execute("UPDATE tickets SET assignee_id = %s WHERE id = %s", (data.assignee_id, ticket_id))
             log_event(db, ticket_id, f"agent:{actor['id']}", "reassigned", before={"assignee_id": ticket["assignee_id"]}, after={"assignee_id": data.assignee_id})
@@ -393,7 +449,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         return service.auto_close(db, now(db))
 
     @app.post("/tickets/{ticket_id}/reopen", tags=["customer"])
-    def reopen_ticket(ticket_id: int, response: Response, db: DB, token: Customer):
+    def reopen_ticket(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], response: Response, db: DB, token: Customer):
         ticket_for_customer(db, ticket_id, token)
         ticket = service.locked_ticket(db, ticket_id)
         action, updated = service.reopen(db, ticket, now(db))
