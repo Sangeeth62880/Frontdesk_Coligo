@@ -1,7 +1,7 @@
 """Explicit customer-facing field lists: no arbitrary DB dictionaries escape."""
 import csv
 import io
-from collections.abc import Mapping, Iterable
+from collections.abc import Iterable, Mapping
 
 TICKET_FIELDS = (
     "id", "subject", "priority", "status", "created_at", "start_at",

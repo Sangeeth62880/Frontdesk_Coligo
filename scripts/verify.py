@@ -1,11 +1,11 @@
 """Run the complete proof, refusing silently skipped database or UI coverage."""
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 
 def main():
@@ -16,7 +16,7 @@ def main():
     root=Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix='frontdesk-proof-') as folder:
         report=Path(folder)/'results.xml'
-        result=subprocess.run([sys.executable,'-m','pytest','-q',f'--junitxml={report}'],cwd=root)
+        result=subprocess.run([sys.executable,'-m','pytest','-q',f'--junitxml={report}'],cwd=root,check=False)
         if result.returncode:return result.returncode
         skipped=sum(int(s.get('skipped',0)) for s in ET.parse(report).iter('testsuite'))
         if skipped:

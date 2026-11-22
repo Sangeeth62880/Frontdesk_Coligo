@@ -1,5 +1,6 @@
 """Audit writes deliberately accept no message or internal note body."""
 import json
+
 from psycopg.types.json import Jsonb
 
 # Each event permits only its defined metadata keys, never arbitrary request data.

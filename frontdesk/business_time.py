@@ -1,8 +1,8 @@
 """Pure business-time calculations. Callers supply database holidays and policies."""
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
 from math import isfinite
+from zoneinfo import ZoneInfo
 
 ZONE = ZoneInfo("Asia/Kolkata")
 
@@ -109,17 +109,17 @@ def deadlines(calendar: Calendar, start: datetime, policy: Policy,
     if now is not None:
         now = local(now)
     first = calendar.add(start, policy.first_reply_minutes)
-    remaining = policy.resolve_minutes
-    if remaining is None:
-        remaining = calendar.minutes(start, calendar.boundary(start.date(), calendar.closes))
+    remaining: float = float(policy.resolve_minutes) if policy.resolve_minutes is not None else calendar.minutes(start, calendar.boundary(start.date(), calendar.closes))
     cursor = start
     previous_end = None
-    intervals = []
+    intervals: list[tuple[datetime, datetime, bool]] = []
     for pause in sorted(pauses, key=lambda p: local(p.paused_at)):
         begin = local(pause.paused_at)
         if pause.resumed_at is None and now is None:
             raise ValueError("An open pause requires an explicit clock")
-        end = local(pause.resumed_at if pause.resumed_at is not None else now)
+        end_value = pause.resumed_at if pause.resumed_at is not None else now
+        assert end_value is not None
+        end = local(end_value)
         if end < begin or (previous_end is not None and begin < previous_end):
             raise ValueError("Invalid or overlapping pause intervals")
         if intervals and intervals[-1][2]:

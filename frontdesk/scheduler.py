@@ -1,4 +1,5 @@
 """Application-owned automatic close sweep; safe with multiple app workers."""
+import json
 import logging
 import threading
 
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 def run_once(database_url):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=10) as db:
-        now = db.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+        row = db.execute("SELECT clock_timestamp() AS now").fetchone()
+        assert row is not None
+        now = row["now"]
         return service.auto_close(db, now)
 
 
@@ -29,11 +32,10 @@ class Sweeper:
             try:
                 result = run_once(self.database_url)
                 self.first_success.set()
-                if result["closed_count"]:
-                    logger.info("Automatically closed %s ticket(s)", result["closed_count"])
-            except Exception:
+                logger.info(json.dumps({"event": "auto_close_sweep", "outcome": "success", "closed_count": result["closed_count"]}))
+            except Exception as exc:  # noqa: BLE001 - keep background worker alive; transaction rolls back
                 # A failed sweep rolls back its whole transaction; retry next tick.
-                logger.exception("Auto-close sweep failed; will retry")
+                logger.error("Auto-close sweep failed; will retry (%s)", type(exc).__name__)
             self.stop_event.wait(self.interval)
 
     def start(self):

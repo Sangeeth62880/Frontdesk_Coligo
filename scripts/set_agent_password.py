@@ -4,6 +4,7 @@ import os
 import sys
 
 import psycopg
+
 from frontdesk.auth import hash_password
 
 
