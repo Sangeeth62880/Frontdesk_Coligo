@@ -226,6 +226,9 @@ def test_demo_credentials_only_when_enabled(harness, monkeypatch):
     monkeypatch.setenv('FRONTDESK_SEED_DEMO', 'true')
     page = c.get('/').text
     assert 'demo-special-&lt;&amp;-secret' in page and 'divya@arvo.example' in page
+    monkeypatch.setenv('FRONTDESK_DEMO_HINT','false')
+    assert 'demo-special-&lt;&amp;-secret' not in c.get('/').text
+    monkeypatch.setenv('FRONTDESK_DEMO_HINT','true')
     with psycopg.connect(url, row_factory=dict_row) as db:
         seed(db)
         before = db.execute('SELECT password_hash FROM agents ORDER BY id').fetchall()

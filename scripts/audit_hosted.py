@@ -31,8 +31,8 @@ def main():
     session=requests.Session()
     page=session.get(BASE,timeout=120)
     match=re.search(r'Password: ([^<]*)</p>',page.text)
-    if not match:raise RuntimeError('Demo login hint unavailable; use supplied credentials via a secure local adaptation')
-    password=html.unescape(match.group(1))
+    password=os.environ.get('FRONTDESK_DEMO_PASSWORD') or (html.unescape(match.group(1)) if match else None)
+    if not password:raise RuntimeError('Supply FRONTDESK_DEMO_PASSWORD securely when the demo hint is disabled')
     response=session.post(BASE+'/auth/login',json={'email':'meera@arvo.example','password':password},timeout=30)
     if response.status_code!=200:raise RuntimeError(f'Hosted sign-in returned {response.status_code}')
     token=response.json()['token']

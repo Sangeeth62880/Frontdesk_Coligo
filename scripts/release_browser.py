@@ -1,6 +1,7 @@
 """Hosted release lifecycle; creates labeled synthetic tickets, never edits demo data."""
 import html
 import json
+import os
 import re
 import sys
 import time
@@ -21,9 +22,9 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     response = requests.get(BASE, timeout=120)
     match = re.search(r'Password: ([^<]*)</p>', response.text)
-    if not match:
-        raise RuntimeError('Enabled demo hint unavailable')
-    password = html.unescape(match.group(1))
+    password = os.environ.get('FRONTDESK_DEMO_PASSWORD') or (html.unescape(match.group(1)) if match else None)
+    if not password:
+        raise RuntimeError('Supply FRONTDESK_DEMO_PASSWORD securely when the demo hint is disabled')
     stamp = datetime.now(UTC).strftime('%Y%m%d-%H%M%S')
     label = f'Hosted verification: release lifecycle {stamp}'
     payload = '<img src=x onerror="window.XSS_EXECUTED=true"> 👩🏽‍💻 e\u0301'
@@ -92,6 +93,7 @@ def main():
         one.get_by_label('Description',exact=True).fill('Test description')
         one.get_by_role('button', name='Create ticket', exact=True).click()
         expect(one.locator('#detail h1')).to_contain_text(label)
+        expect(one.locator('.message:not(.internal)').first).to_contain_text('Test description')
         ticket_id = int(one.url.rsplit('/', 1)[-1])
         result['ticket_ids'].append(ticket_id)
         path = f'/tickets/{ticket_id}'
@@ -104,6 +106,10 @@ def main():
         two.get_by_role('button', name='Take this ticket').click()
         expect(two.locator('#toast')).to_contain_text('Meera')
         expect(two.locator('#ticket-assignee')).to_have_text('Meera')
+        expect(two.locator('#ticket-status')).to_be_disabled()
+        expect(two.locator('#ticket-status')).to_have_attribute('title','Assigned to Meera. Only Meera can resolve or wait.')
+        expect(two.locator('#ticket-priority')).to_be_disabled()
+        expect(two.locator('#ticket-priority')).to_have_attribute('title','Assigned to Meera. Only Meera can change priority.')
         assert 'customer_token' not in one.request.get(BASE+path, headers=headers).json()
         listing = one.request.get(BASE+'/tickets?assignee=all', headers=headers).json()
         assert all('customer_token' not in row for row in listing)
@@ -148,7 +154,7 @@ def main():
         with customer.expect_download() as download:
             customer.get_by_role('button', name='Download ticket CSV').click()
         csv = Path(download.value.path()).read_text()
-        assert label in csv and 'RELEASE_PRIVATE_NOTE_' not in csv
+        assert label in csv and 'RELEASE_PRIVATE_NOTE_' not in csv and 'Test description' in csv
         download.value.save_as(str(OUT/'hosted-customer.csv'))
         one.get_by_label('Workspace menu').click()
         one.locator('#refresh').click()
@@ -162,6 +168,8 @@ def main():
         one.get_by_label('Message to customer',exact=True).fill('The workspace issue is resolved.')
         one.get_by_role('button',name='Resolve ticket',exact=True).click()
         expect(one.get_by_role('button', name='Reopen ticket')).to_be_visible()
+        customer.reload()
+        expect(customer.locator('.thread')).to_contain_text('The workspace issue is resolved.')
         one.get_by_role('button', name='Reopen ticket').click()
         expect(one.locator('.detail-customer')).to_contain_text('Cycle 2')
         result['checks'].extend(['customer note privacy', 'customer answer resumes', 'native CSV download', 'simulated answer', 'resolve/reopen'])
