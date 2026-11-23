@@ -7,6 +7,7 @@ import psycopg
 import uvicorn
 from psycopg.rows import dict_row
 
+from scripts.maintain_demo import from_environment as maintain_demo
 from scripts.migrate import main as migrate
 from scripts.provision_runtime import provision, verify_runtime
 from scripts.seed_demo import seed
@@ -22,6 +23,7 @@ def main():
     if missing:
         raise RuntimeError("Missing required settings: " + ", ".join(missing))
     logging.basicConfig(level=os.environ.get("FRONTDESK_LOG_LEVEL", "INFO"), format="%(message)s")
+    maintain_demo()
     migrate()
     # Provision demo passwords with the migration owner, before switching to the
     # runtime role (which deliberately cannot change agent credentials).

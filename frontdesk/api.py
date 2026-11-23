@@ -137,7 +137,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
     def workspace():
         page = (static / "index.html").read_text()
         hint = ""
-        if os.environ.get("FRONTDESK_SEED_DEMO", "false").lower() == "true":
+        if os.environ.get("FRONTDESK_SEED_DEMO", "false").lower() == "true" and os.environ.get("FRONTDESK_DEMO_HINT", "true").lower() == "true":
             password = os.environ.get("FRONTDESK_DEMO_PASSWORD")
             if password:
                 hint = '<p class="form-hint">Demo: meera@arvo.example, arun@arvo.example, divya@arvo.example · Password: ' + html.escape(password) + '</p>'
