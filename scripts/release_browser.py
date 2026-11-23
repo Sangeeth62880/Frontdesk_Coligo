@@ -124,6 +124,8 @@ def main():
         assert not one.evaluate('Boolean(window.XSS_EXECUTED)')
         one.locator('#reply-body').fill('Please confirm the workspace ID.')
         one.locator('#ticket-status').select_option('waiting_on_customer')
+        expect(one.get_by_label('Question to customer',exact=True)).to_be_visible()
+        one.get_by_role('button',name='Send and wait',exact=True).click()
         expect(one.locator('#ticket-status')).to_have_value('waiting_on_customer')
         one.locator('#ticket-priority').select_option('urgent')
         expect(one.locator('#ticket-priority')).to_have_value('urgent')

@@ -28,8 +28,9 @@ def test_customer_access_is_scoped(harness, seeded_ticket):
     client, _, _ = harness
     path = f'/customer/tickets/{seeded_ticket["id"]}'
     assert client.get(path).status_code == 401
-    assert client.get(path, headers={"X-Customer-Token": str(uuid4())}).status_code == 404
-    assert client.get("/customer/tickets", headers={"X-Customer-Token": str(uuid4())}).json() == []
+    assert client.get(path, headers={"X-Customer-Token": str(uuid4())}).status_code == 401
+    response = client.get("/customer/tickets", headers={"X-Customer-Token": str(uuid4())})
+    assert response.status_code == 401 and response.json() == {"detail":"Customer access token invalid"}
 
 
 def test_csv_neutralizes_formula_injection(harness, seeded_ticket):

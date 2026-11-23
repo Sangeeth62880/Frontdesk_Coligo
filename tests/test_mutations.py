@@ -102,7 +102,7 @@ def test_agent_views_require_auth_and_customer_reply_is_scoped(harness, agent_he
     other = {"X-Customer-Token": str(uuid4())}
     for path in ['/tickets', f'/tickets/{ticket["id"]}', f'/tickets/{ticket["id"]}/events', '/agents']:
         assert client.get(path, headers={"X-Customer-Token": ticket["customer_token"]}).status_code == 401
-    assert client.post(f'/tickets/{ticket["id"]}/customer-reply', headers=other, json={"body": "Unauthorized"}).status_code == 404
+    assert client.post(f'/tickets/{ticket["id"]}/customer-reply', headers=other, json={"body": "Unauthorized"}).status_code == 401
     assert client.get('/tickets?assignee=all', headers=agent_headers).json()[0]["id"] == ticket["id"]
     assert client.get('/tickets', headers=agent_headers).json() == []
 

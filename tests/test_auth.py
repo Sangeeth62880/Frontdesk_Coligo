@@ -171,7 +171,8 @@ def test_capability_and_sweep_isolation(harness, agent_headers):
         assert c.post('/admin/sweep', headers=headers).status_code == 401
     assert c.get('/agents', headers=customer).status_code == 401
     # A session copied into the capability header also cannot become a capability.
-    assert c.get('/customer/tickets', headers={'X-Customer-Token': agent_headers['Authorization'][7:]}).status_code == 422
+    response = c.get('/customer/tickets', headers={'X-Customer-Token': agent_headers['Authorization'][7:]})
+    assert response.status_code == 401 and response.json() == {'detail':'Customer access token invalid'}
 
 
 def test_secrets_absent_from_dump_logs_errors_and_other_responses(harness, caplog):

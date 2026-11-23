@@ -6,4 +6,4 @@ const context=vm.createContext({document:{querySelector:node,querySelectorAll:()
 vm.runInContext(fs.readFileSync('frontdesk/static/app.js','utf8'),context);
 context.fixture=data;
 vm.runInContext(`state.agent=1;state.agents=fixture.agents;state.tickets=fixture.tickets;state.queue='all';state.detail=fixture.detail;state.events=fixture.events;renderList();renderDetail();`,context);
-process.stdout.write(JSON.stringify({list:node('#ticket-list').innerHTML,detail:node('#detail').innerHTML}));
+process.stdout.write(JSON.stringify({eventLabels:vm.runInContext('EVENT_LABELS',context),list:node('#ticket-list').innerHTML,detail:node('#detail').innerHTML}));

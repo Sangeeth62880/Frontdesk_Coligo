@@ -92,7 +92,7 @@ def test_reopen_auth_and_active_ticket_conflict(harness, agent_headers):
     ticket = create(client, agent_headers)
     path = f'/tickets/{ticket["id"]}/reopen'
     assert client.post(path).status_code == 401
-    assert client.post(path, headers={"X-Customer-Token": str(uuid4())}).status_code == 404
+    assert client.post(path, headers={"X-Customer-Token": str(uuid4())}).status_code == 401
     assert client.post(path, headers={"X-Customer-Token": ticket["customer_token"]}).status_code == 409
 
 

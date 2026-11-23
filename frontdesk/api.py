@@ -170,10 +170,17 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         db.execute("SELECT 1")
         return {"status": "ok"}
 
-    def customer_token(x_customer_token: Annotated[UUID | None, Header()] = None):
-        if x_customer_token is None:
-            raise HTTPException(401, "Customer access token required")
-        return x_customer_token
+    def customer_token(db: DB, x_customer_token: Annotated[str | None, Header()] = None):
+        invalid = HTTPException(401, "Customer access token invalid")
+        if x_customer_token is None or len(x_customer_token) != 36:
+            raise invalid
+        try:
+            parsed = UUID(x_customer_token)
+        except ValueError:
+            raise invalid from None
+        if str(parsed) != x_customer_token or not db.execute("SELECT 1 FROM tickets WHERE customer_token=%s LIMIT 1", (parsed,)).fetchone():
+            raise invalid
+        return parsed
 
     Customer = Annotated[UUID, Depends(customer_token)]
 

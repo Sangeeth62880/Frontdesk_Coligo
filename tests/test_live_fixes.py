@@ -95,3 +95,34 @@ def test_description_validation(harness, agent_headers, route, body):
     assert c.post(route, headers=agent_headers, json=payload).status_code == 422
     payload.pop('body')
     assert c.post(route, headers=agent_headers, json=payload).status_code == 422
+
+
+def test_every_event_type_has_an_explicit_ui_label(harness, agent_headers):
+    from frontdesk.events import PAYLOAD_FIELDS
+    from tests.test_mutations import create
+    from tests.test_security_hardening import rendered_ui
+    c, _, _ = harness
+    ticket = create(c,agent_headers)
+    ui = rendered_ui(c,agent_headers,ticket['id'])
+    assert set(ui['eventLabels']) == set(PAYLOAD_FIELDS)
+    assert all(value and value != key for key,value in ui['eventLabels'].items())
+    assert 'Source: customer' in ui['detail']
+
+
+def test_customer_token_failures_are_uniform_and_valid_body_errors_stay_422(harness, agent_headers):
+    from uuid import uuid4
+
+    from tests.test_mutations import create
+    c, _, _ = harness
+    ticket = create(c,agent_headers)
+    cases = [None,'wrong-format','0'*32,str(uuid4()),str(uuid4()).upper(),'x'*1000]
+    expected = {'detail':'Customer access token invalid'}
+    routes = [('GET','/customer/tickets'),('GET',f'/customer/tickets/{ticket["id"]}'),('GET','/export.csv'),('POST',f'/tickets/{ticket["id"]}/reopen'),('POST',f'/tickets/{ticket["id"]}/customer-reply')]
+    for token in cases:
+        headers = {} if token is None else {'X-Customer-Token':token}
+        for method,path in routes:
+            response = c.request(method,path,headers=headers,json={'body':'Valid request'})
+            assert response.status_code == 401 and response.json() == expected
+    for body in ('','bad\x00body','x'*10001):
+        response = c.post(f'/tickets/{ticket["id"]}/customer-reply',headers={'X-Customer-Token':ticket['customer_token']},json={'body':body})
+        assert response.status_code == 422
