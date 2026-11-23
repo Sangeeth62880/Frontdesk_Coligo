@@ -7,7 +7,7 @@ from tests.test_mutations import create, event_types
 
 def test_agent_creation_has_stored_null_reply_target(harness, agent_headers):
     c, url, _now = harness
-    ticket = c.post('/tickets', headers=agent_headers, json={'subject':'On behalf', 'customer_email':'a@example.com', 'source':'agent'}).json()
+    ticket = c.post('/tickets', headers=agent_headers, json={'body':'Test description', 'subject':'On behalf', 'customer_email':'a@example.com', 'source':'agent'}).json()
     view = c.get(f'/tickets/{ticket["id"]}', headers=agent_headers).json()
     assert view['sla']['first_reply_due_at'] is None
     with psycopg.connect(url) as db:

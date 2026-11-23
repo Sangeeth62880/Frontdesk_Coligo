@@ -41,7 +41,7 @@ def test_capability_is_only_visible_to_assignee(harness, agent_headers):
 @pytest.mark.parametrize('field', ['subject', 'customer_email'])
 def test_null_ticket_input_is_rejected(harness, agent_headers, field):
     c, _, _ = harness
-    data = {'subject':'Safe', 'customer_email':'safe@example.com', field:'bad\x00@example.com'}
+    data = {'body':'Test description', 'subject':'Safe', 'customer_email':'safe@example.com', field:'bad\x00@example.com'}
     assert c.post('/tickets', headers=agent_headers, json=data).status_code == 422
     assert c.post('/customer/tickets', json=data).status_code == 422
 
@@ -94,7 +94,7 @@ def test_parallel_customer_intake_quota_and_recovery(harness, monkeypatch):
     # A separate clocked app permits an exact window recovery check.
     with TestClient(create_app(url, sweep_interval=0, clock=lambda:now[0])) as client:
         def post(c):
-            return c.post('/customer/tickets', headers={'X-Forwarded-For':str(uuid4())}, json={'subject':'Quota', 'customer_email':'q@example.com'})
+            return c.post('/customer/tickets', headers={'X-Forwarded-For':str(uuid4())}, json={'body':'Test description', 'subject':'Quota', 'customer_email':'q@example.com'})
         results = parallel(client, [post]*8)
         assert sorted(r.status_code for r in results) == [201]*3+[429]*5
         assert all(int(r.headers['retry-after']) > 0 for r in results if r.status_code == 429)
@@ -127,7 +127,7 @@ def test_event_failure_rolls_back_entire_mutation(harness, agent_headers, monkey
     assert r.status_code == 503 and 'PRIVATE_SQL_SECRET' not in r.text
     assert c.get(p, headers=agent_headers).json() == before
     with psycopg.connect(url) as db:
-        assert db.execute('SELECT count(*) FROM public_messages').fetchone()[0] == 0
+        assert db.execute('SELECT count(*) FROM public_messages').fetchone()[0] == 1
         assert db.execute('SELECT count(*) FROM events').fetchone()[0] == 2
 
 

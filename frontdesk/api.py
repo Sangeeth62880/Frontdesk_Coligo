@@ -60,6 +60,7 @@ class NoteInput(SafeInput):
 class TicketInput(SafeInput):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     subject: str = Field(min_length=1, max_length=300)
+    body: str = Field(min_length=1, max_length=10000)
     customer_email: str = Field(min_length=3, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
     priority: Literal["urgent", "medium", "small"] = "medium"
 
@@ -257,7 +258,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
 
     @app.get("/export.csv", response_class=PlainTextResponse, tags=["customer"])
     def export(db: DB, token: Customer):
-        rows = db.execute("SELECT * FROM tickets WHERE customer_token = %s ORDER BY id", (token,)).fetchall()
+        rows = db.execute("SELECT t.*, COALESCE((SELECT body FROM public_messages WHERE ticket_id=t.id AND author_type='customer' ORDER BY created_at,id LIMIT 1),'') AS description FROM tickets t WHERE customer_token = %s ORDER BY id", (token,)).fetchall()
         return PlainTextResponse(customer_csv(rows), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=tickets.csv"})
 
     @app.post("/tickets/{ticket_id}/notes", status_code=201)
@@ -294,7 +295,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
 
     @app.post("/tickets", status_code=201)
     def create(data: AgentTicketInput, db: DB, actor: Agent):
-        ticket = service.create_ticket(db, data.subject, data.customer_email, data.priority, now(db), f"agent:{actor['id']}", source=data.source)
+        ticket = service.create_ticket(db, data.subject, data.customer_email, data.priority, now(db), f"agent:{actor['id']}", source=data.source, body=data.body)
         return {**customer_ticket(ticket), "customer_token": str(ticket["customer_token"])}
 
     @app.post("/customer/tickets", status_code=201, tags=["customer"])
@@ -312,7 +313,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         if row["attempts"] > int(os.environ.get("FRONTDESK_INTAKE_LIMIT", "10")):
             retry = max(1, int((row["window_start"] + timedelta(minutes=10) - instant).total_seconds()))
             return JSONResponse(status_code=429, content={"detail": "Too many tickets. Try again later."}, headers={"Retry-After": str(retry)})
-        ticket = service.create_ticket(db, data.subject, data.customer_email, data.priority, now(db), "customer")
+        ticket = service.create_ticket(db, data.subject, data.customer_email, data.priority, now(db), "customer", body=data.body)
         return {**customer_ticket(ticket), "customer_token": str(ticket["customer_token"])}
 
     def sla_view(db, ticket, context=None, instant=None):

@@ -91,7 +91,7 @@ def sla(db, ticket, now, *, context=None):
 
 
 def create_ticket(db, subject, customer_email, priority, now, actor,
-                  previous_ticket_id=None, customer_token=None, *, source=None):
+                  previous_ticket_id=None, customer_token=None, *, source=None, body=None):
     calendar, _ = calendar_and_policy(db, priority)
     start = calendar.start(now)
     if customer_token is None:
@@ -103,8 +103,9 @@ def create_ticket(db, subject, customer_email, priority, now, actor,
     source = source or ("agent" if actor.startswith("agent:") else "customer")
     if source == "agent":
         row = db.execute("UPDATE tickets SET first_reply_required = false WHERE id = %s RETURNING *", (row["id"],)).fetchone()
+    description = db.execute("INSERT INTO public_messages(ticket_id,author_type,body,created_at) VALUES (%s,'customer',%s,%s) RETURNING id", (row['id'],body,row['created_at'])).fetchone() if body is not None else None
     targets = sla(db, row, now)
-    log_event(db, row["id"], actor, "created", after={"source": source, "priority": priority, "cycle_number": 1, "previous_ticket_id": previous_ticket_id, "resolution_due_at": targets["resolution_due_at"]})
+    log_event(db, row["id"], actor, "created", after={"message_id": description["id"] if description else None, "source": source, "priority": priority, "cycle_number": 1, "previous_ticket_id": previous_ticket_id, "resolution_due_at": targets["resolution_due_at"]})
     return row
 
 

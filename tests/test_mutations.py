@@ -7,7 +7,7 @@ from frontdesk.business_time import ZONE
 
 
 def create(client, agent_headers, priority="medium"):
-    response = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Checkout fails", "customer_email": "customer@example.com", "priority": priority})
+    response = client.post('/customer/tickets', headers=agent_headers, json={'body':'Test description', "subject": "Checkout fails", "customer_email": "customer@example.com", "priority": priority})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -35,7 +35,7 @@ def test_first_reply_only_first_public_agent_message(harness, agent_headers):
     from datetime import datetime
     assert datetime.fromisoformat(view["first_replied_at"]) == first
     assert view["internal_notes"][0]["visibility"] == "internal"
-    assert len(view["messages"]) == 3
+    assert len(view["messages"]) == 4
     assert [event["event_type"] for event in event_types(client, ticket["id"], agent_headers)] == ["created", "public_reply", "internal_note_added", "claimed", "public_reply", "public_reply"]
 
 
@@ -111,7 +111,7 @@ def test_client_timestamps_rejected_and_server_event_time_used(harness, agent_he
     from datetime import datetime
     client, _, _ = harness
     before = datetime.now(UTC)
-    bad = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Test", "customer_email": "a@example.com", "created_at": "2000-01-01T00:00:00Z"})
+    bad = client.post('/customer/tickets', headers=agent_headers, json={'body':'Test description', "subject": "Test", "customer_email": "a@example.com", "created_at": "2000-01-01T00:00:00Z"})
     assert bad.status_code == 422
     ticket = create(client, agent_headers)
     stamped = datetime.fromisoformat(event_types(client, ticket["id"], agent_headers)[0]["created_at"])
@@ -123,7 +123,7 @@ def test_client_timestamps_rejected_and_server_event_time_used(harness, agent_he
 def test_calendar_range_failure_rolls_back_creation(harness, agent_headers):
     client, url, now = harness
     now[0] = now[0].replace(year=2028)
-    response = client.post('/customer/tickets', headers=agent_headers, json={"subject": "Out of range", "customer_email": "a@example.com"})
+    response = client.post('/customer/tickets', headers=agent_headers, json={'body':'Test description', "subject": "Out of range", "customer_email": "a@example.com"})
     assert response.status_code == 503
     assert "last seeded holiday" in response.text
     with psycopg.connect(url) as db:

@@ -9,7 +9,7 @@ import pytest
 @pytest.mark.parametrize('source', [None, 'customer', 'agent'])
 def test_ticket_creation_source_paths(harness, agent_headers, priority, source):
     client, url, _ = harness
-    body = {'subject': 'Source test', 'customer_email': 'customer@example.com', 'priority': priority}
+    body = {'body':'Test description', 'subject': 'Source test', 'customer_email': 'customer@example.com', 'priority': priority}
     customer = client.post('/customer/tickets', json=body)
     assert customer.status_code == 201
     if source is not None:
@@ -39,10 +39,10 @@ def test_ticket_creation_source_paths(harness, agent_headers, priority, source):
 def test_invalid_ticket_source_does_not_create(harness, agent_headers):
     c, url, _ = harness
     for value in ['other', None, 1]:
-        response = c.post('/tickets', headers=agent_headers, json={'subject':'Invalid', 'customer_email':'c@example.com', 'source':value})
+        response = c.post('/tickets', headers=agent_headers, json={'body':'Test description', 'subject':'Invalid', 'customer_email':'c@example.com', 'source':value})
         assert response.status_code == 422
     # Public intake keeps its original contract; clients cannot disable its SLA.
-    response = c.post('/customer/tickets', json={'subject':'Invalid', 'customer_email':'c@example.com', 'source':'agent'})
+    response = c.post('/customer/tickets', json={'body':'Test description', 'subject':'Invalid', 'customer_email':'c@example.com', 'source':'agent'})
     assert response.status_code == 422
     with psycopg.connect(url) as db:
         assert db.execute('SELECT count(*) FROM tickets').fetchone()[0] == 0

@@ -18,6 +18,7 @@ def assert_replay(db, ticket_id):
     for event in db.execute('SELECT * FROM events WHERE ticket_id=%s ORDER BY id',(ticket_id,)):
         kind=event['event_type']; after=event['after_value'] or {}
         if kind=='created':
+            if after.get('message_id') is not None:messages.append(after['message_id'])
             state['priority']=after['priority']
             state['previous_ticket_id']=after['previous_ticket_id']
         if kind in ('claimed','reassigned'):state['assignee_id']=after['assignee_id']
@@ -47,7 +48,7 @@ def test_parallel_creation_mixed_mutations_and_event_replay(harness,agent_header
     c,url,_=harness
     def create_one(i):
         with TestClient(c.app) as client:
-            r=client.post('/tickets',headers=agent_headers,json={'subject':f'Seeded stress {i}','customer_email':'stress@example.com'})
+            r=client.post('/tickets',headers=agent_headers,json={'body':'Test description', 'subject':f'Seeded stress {i}','customer_email':'stress@example.com'})
             assert r.status_code==201
             return r.json()
     with ThreadPoolExecutor(max_workers=10) as pool:
@@ -105,7 +106,7 @@ def test_six_deterministic_review_cases_preserve_immutable_history(harness):
 def test_list_sla_prefetch_has_constant_query_count(harness,agent_headers,monkeypatch):
     c,_,_=harness
     for i in range(25):
-        assert c.post('/tickets',headers=agent_headers,json={'subject':f'Prefetch {i}','customer_email':'prefetch@example.com','source':'agent'}).status_code==201
+        assert c.post('/tickets',headers=agent_headers,json={'body':'Test description', 'subject':f'Prefetch {i}','customer_email':'prefetch@example.com','source':'agent'}).status_code==201
     assert c.get('/tickets?assignee=all',headers=agent_headers).status_code==200
     statements=[]
     execute=psycopg.Connection.execute

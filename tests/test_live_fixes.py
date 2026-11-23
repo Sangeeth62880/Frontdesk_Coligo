@@ -1,10 +1,13 @@
+import psycopg
+import pytest
+
 from tests.conftest import login_headers
 
 
 def test_owner_status_priority_and_unassigned_triage(harness, agent_headers):
     c, _, _ = harness
     other = login_headers(c, 2)
-    t = c.post('/tickets', headers=agent_headers, json={'subject':'Permission regression','customer_email':'permissions@example.com'}).json()
+    t = c.post('/tickets', headers=agent_headers, json={'body':'Test description', 'subject':'Permission regression','customer_email':'permissions@example.com'}).json()
     p = f'/tickets/{t["id"]}'
     def snapshot():
         detail = c.get(p, headers=agent_headers).json()
@@ -26,7 +29,7 @@ def test_owner_status_priority_and_unassigned_triage(harness, agent_headers):
 
 def test_resolution_public_message_is_atomic_idempotent_and_first_reply(harness, agent_headers):
     c, _, _ = harness
-    t = c.post('/tickets', headers=agent_headers, json={'subject':'Resolution message','customer_email':'resolved@example.com'}).json()
+    t = c.post('/tickets', headers=agent_headers, json={'body':'Test description', 'subject':'Resolution message','customer_email':'resolved@example.com'}).json()
     p = f'/tickets/{t["id"]}'
     assert c.post(p+'/claim', headers=agent_headers).status_code == 200
     assert c.post(p+'/notes', headers=agent_headers, json={'body':'Private investigation'}).status_code == 201
@@ -40,9 +43,9 @@ def test_resolution_public_message_is_atomic_idempotent_and_first_reply(harness,
     assert c.post(p+'/status', headers=headers, json=payload).json() == first.json()
     detail = c.get(p, headers=agent_headers).json()
     assert detail['status'] == 'resolved' and detail['first_reply_at'] is not None
-    assert [m['body'] for m in detail['messages']] == ['The issue is fixed.']
+    assert [m['body'] for m in detail['messages']] == ['Test description','The issue is fixed.']
     public = c.get('/customer'+p, headers={'X-Customer-Token':t['customer_token']}).json()
-    assert [m['body'] for m in public['messages']] == ['The issue is fixed.']
+    assert [m['body'] for m in public['messages']] == ['Test description','The issue is fixed.']
     assert 'Private investigation' not in str(public)
     after = c.get(p+'/events', headers=agent_headers).json()
     assert [e['event_type'] for e in after[len(before):]] == ['public_reply','status_changed']
@@ -52,9 +55,43 @@ def test_resolution_public_message_is_atomic_idempotent_and_first_reply(harness,
 
 def test_resolution_without_message_still_works(harness, agent_headers):
     c, _, _ = harness
-    t = c.post('/tickets', headers=agent_headers, json={'subject':'No message','customer_email':'resolved@example.com'}).json()
+    t = c.post('/tickets', headers=agent_headers, json={'body':'Test description', 'subject':'No message','customer_email':'resolved@example.com'}).json()
     p = f'/tickets/{t["id"]}'
     assert c.post(p+'/claim', headers=agent_headers).status_code == 200
     version = c.get(p, headers=agent_headers).json()['version']
     assert c.post(p+'/status', headers=agent_headers, json={'status':'resolved','version':version}).status_code == 200
-    assert c.get(p, headers=agent_headers).json()['messages'] == []
+    assert c.get(p, headers=agent_headers).json()['messages'][0]['body'] == 'Test description'
+    assert len(c.get(p, headers=agent_headers).json()['messages']) == 1
+
+
+@pytest.mark.parametrize('route', ['/tickets','/customer/tickets'])
+def test_description_is_first_customer_message_and_does_not_change_clocks(harness, agent_headers, route):
+    c, url, _ = harness
+    description = '<img src=x onerror="window.XSS_EXECUTED=true"> Customer details'
+    payload = {'subject':'Description test','body':description,'customer_email':'description@example.com'}
+    t = c.post(route, headers=agent_headers, json=payload).json()
+    view = c.get(f'/tickets/{t["id"]}', headers=agent_headers).json()
+    assert len(view['messages']) == 1
+    assert view['messages'][0]['body'] == description and view['messages'][0]['author_type'] == 'customer'
+    assert view['first_replied_at'] is None and view['first_reply_at'] is None
+    access = {'X-Customer-Token':t['customer_token']}
+    assert c.get(f'/customer/tickets/{t["id"]}', headers=access).json()['messages'][0]['body'] == description
+    exported = c.get('/export.csv', headers=access)
+    assert description.replace('"','""') in exported.text
+    control = c.post(route, headers=agent_headers, json=payload | {'body':'Ordinary description'}).json()
+    other = c.get(f'/tickets/{control["id"]}', headers=agent_headers).json()
+    assert view['sla'] == other['sla'] and view['start_at'] == other['start_at']
+    with psycopg.connect(url) as db:
+        assert db.execute('SELECT count(*) FROM ticket_pauses').fetchone()[0] == 0
+        event = c.get(f'/tickets/{t["id"]}/events', headers=agent_headers).json()[0]
+        assert event['after_value']['message_id'] == view['messages'][0]['id']
+
+
+@pytest.mark.parametrize('route', ['/tickets','/customer/tickets'])
+@pytest.mark.parametrize('body', [None,'','   ','bad\x00body','x'*10001])
+def test_description_validation(harness, agent_headers, route, body):
+    c, _, _ = harness
+    payload = {'subject':'Invalid description','customer_email':'description@example.com','body':body}
+    assert c.post(route, headers=agent_headers, json=payload).status_code == 422
+    payload.pop('body')
+    assert c.post(route, headers=agent_headers, json=payload).status_code == 422

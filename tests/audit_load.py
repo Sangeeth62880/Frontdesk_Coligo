@@ -21,7 +21,7 @@ def test_local_50_readers_10_writers(browser_stack):
     headers={'Authorization':'Bearer '+login.json()['token']}
     ids=[]
     for i in range(18):
-        r=requests.post(base+'/tickets',headers=headers,json={'subject':f'Local audit load {i}','customer_email':'load@example.com','source':'agent'},timeout=10)
+        r=requests.post(base+'/tickets',headers=headers,json={'body':'Test description', 'subject':f'Local audit load {i}','customer_email':'load@example.com','source':'agent'},timeout=10)
         assert r.status_code==201
         ids.append(r.json()['id'])
     # Warm materialized breach flags; subsequent unchanged reads need no updates.
@@ -47,7 +47,7 @@ def test_local_50_readers_10_writers(browser_stack):
     elapsed=time.monotonic()-start
     def write_user(i):
         tick=time.monotonic()
-        r=requests.post(base+'/tickets',headers=headers,json={'subject':f'Local concurrent writer {i}','customer_email':'load@example.com'},timeout=20)
+        r=requests.post(base+'/tickets',headers=headers,json={'body':'Test description', 'subject':f'Local concurrent writer {i}','customer_email':'load@example.com'},timeout=20)
         return time.monotonic()-tick,r.status_code
     with ThreadPoolExecutor(max_workers=10) as pool:writes=list(pool.map(write_user,range(10)))
     latencies=sorted(r[0] for r in results)

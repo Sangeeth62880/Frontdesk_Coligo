@@ -21,7 +21,7 @@ def test_openapi_generated_requests_never_500(harness,agent_headers,data):
     schemas=c.get('/openapi.json').json()['components']['schemas']
     name=data.draw(st.sampled_from(['AgentTicketInput','NoteInput','MessageInput','StatusInput','PriorityInput','ReassignInput']))
     body=data.draw(from_schema(schemas[name]))
-    created=c.post('/tickets',headers=agent_headers,json={'subject':'Schema fuzz fixture','customer_email':'schema@example.com'})
+    created=c.post('/tickets',headers=agent_headers,json={'body':'Test description', 'subject':'Schema fuzz fixture','customer_email':'schema@example.com'})
     assert created.status_code==201
     ticket=created.json()
     route={'AgentTicketInput':'/tickets','NoteInput':f'/tickets/{ticket["id"]}/notes','MessageInput':f'/tickets/{ticket["id"]}/messages','StatusInput':f'/tickets/{ticket["id"]}/status','PriorityInput':f'/tickets/{ticket["id"]}/priority','ReassignInput':f'/tickets/{ticket["id"]}/reassign'}[name]
@@ -44,9 +44,9 @@ def test_wire_fuzz_and_auth_inventory(harness,agent_headers):
         r=c.post('/tickets',headers=agent_headers|{'Content-Type':media},content='{"subject":"x","customer_email":"a@example.com"}')
         assert r.status_code==422
     for subject in ('👩🏽‍💻','\u202eRTL','e\u0301','=SUM(A1:A2)','x'*300):
-        r=c.post('/tickets',headers=agent_headers,json={'subject':subject,'customer_email':'a@example.com'})
+        r=c.post('/tickets',headers=agent_headers,json={'body':'Test description', 'subject':subject,'customer_email':'a@example.com'})
         assert r.status_code==201
-    assert c.post('/tickets',headers=agent_headers,json={'subject':'x'*301,'customer_email':'a@example.com'}).status_code==422
+    assert c.post('/tickets',headers=agent_headers,json={'body':'Test description', 'subject':'x'*301,'customer_email':'a@example.com'}).status_code==422
     r=c.get(f'/tickets/{ticket["id"]}',headers=[('Authorization','Bearer malformed'),('Authorization',agent_headers['Authorization'])])
     assert r.status_code==401
     r=c.get('/tickets/',headers=agent_headers,follow_redirects=False)

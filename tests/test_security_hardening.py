@@ -31,7 +31,7 @@ def test_raw_html_escaped_in_actual_agent_and_customer_renderers(harness,agent_h
     raw='  <script>alert("xss")</script><b>raw HTML & text</b>\n'
     assert c.post(p+'/messages',headers=agent_headers,json={'body':raw}).status_code==201
     c.post(p+'/notes',headers=agent_headers,json={'body':'NOTE_MARKER_7f3a'})
-    with psycopg.connect(url) as db:assert db.execute('SELECT body FROM public_messages').fetchone()[0]==raw
+    with psycopg.connect(url) as db:assert db.execute("SELECT body FROM public_messages WHERE author_type='agent'").fetchone()[0]==raw
     html=rendered_ui(c,agent_headers,t['id'])['detail']
     parser=Tags();parser.feed(html)
     assert 'script' not in parser.tags and 'b' not in parser.tags

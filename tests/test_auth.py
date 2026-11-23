@@ -138,7 +138,7 @@ def test_header_cannot_impersonate_and_every_agent_mutation_actor(harness):
     b = login_headers(c, 2) | {'X-Agent-Id': '1'}
     assert c.get('/auth/me', headers=a).json()['id'] == 1
     assert c.get('/auth/me', headers=a | {'X-Agent-Id': 'garbage'}).status_code == 200
-    r = c.post('/tickets', headers=a, json={'subject': 'Auth actors', 'customer_email': 'customer@example.com'})
+    r = c.post('/tickets', headers=a, json={'body':'Test description', 'subject': 'Auth actors', 'customer_email': 'customer@example.com'})
     assert r.status_code == 201
     p = f'/tickets/{r.json()["id"]}'
     assert c.post(p+'/claim', headers=a).json()['assignee_id'] == 1
@@ -154,13 +154,13 @@ def test_header_cannot_impersonate_and_every_agent_mutation_actor(harness):
     assert c.post(p+'/reassign', headers=a, json={'assignee_id': 2}).status_code == 200
     with psycopg.connect(url) as db:
         assert {r[0] for r in db.execute('SELECT actor FROM events')} == {'agent:1'}
-        assert {r[0] for r in db.execute('SELECT agent_id FROM public_messages')} == {1}
+        assert {r[0] for r in db.execute("SELECT agent_id FROM public_messages WHERE author_type='agent'")} == {1}
         assert {r[0] for r in db.execute('SELECT agent_id FROM internal_notes')} == {1}
 
 
 def test_capability_and_sweep_isolation(harness, agent_headers):
     c, _, _ = harness
-    t = c.post('/customer/tickets', json={'subject': 'Customer', 'customer_email': 'c@example.com'}).json()
+    t = c.post('/customer/tickets', json={'body':'Test description', 'subject': 'Customer', 'customer_email': 'c@example.com'}).json()
     customer = {'X-Customer-Token': t['customer_token']}
     for headers in [agent_headers, {'Authorization': 'Bearer test-sweep-secret'}, {}]:
         for path in ['/customer/tickets', f'/customer/tickets/{t["id"]}', '/export.csv']:
@@ -252,7 +252,7 @@ def test_restricted_runtime_can_authenticate_but_cannot_edit_audit(harness):
             assert signin(restricted, password='wrong').status_code == 401
             headers = login_headers(restricted, 1)
             assert restricted.get('/auth/me', headers=headers).status_code == 200
-            ticket = restricted.post('/tickets', headers=headers, json={'subject': 'Runtime', 'customer_email': 'x@example.com'})
+            ticket = restricted.post('/tickets', headers=headers, json={'body':'Test description', 'subject': 'Runtime', 'customer_email': 'x@example.com'})
             assert ticket.status_code == 201
             assert restricted.post('/auth/logout', headers=headers).status_code == 200
         for statement in ['UPDATE events SET actor=\'forged\'', 'DELETE FROM events', 'TRUNCATE events', 'UPDATE agents SET password_hash=NULL']:

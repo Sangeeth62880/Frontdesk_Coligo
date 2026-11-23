@@ -53,7 +53,7 @@ def test_parallel_idempotent_reply_and_expiration(harness,agent_headers,customer
     assert results[0].json()==results[1].json()
     assert c.post(route,headers=hdr,json={'body':'Different'}).status_code==409
     with psycopg.connect(url) as db:
-        assert db.execute('SELECT count(*) FROM public_messages').fetchone()[0]==1
+        assert db.execute('SELECT count(*) FROM public_messages').fetchone()[0]==2
         assert db.execute("SELECT count(*) FROM events WHERE event_type='public_reply'").fetchone()[0]==1
         db.execute("UPDATE request_idempotency SET created_at=clock_timestamp()-interval '25 hours'")
     result=c.post(route,headers=hdr,json={'body':'One reply'})

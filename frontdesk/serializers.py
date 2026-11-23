@@ -13,7 +13,7 @@ PRIVATE_TICKET_FIELDS = {
     "first_reply_due_at", "first_reply_breached", "resolution_breached", "version",
 }
 MESSAGE_FIELDS = ("id", "author_type", "body", "created_at")
-CSV_FIELDS = ("id", "subject", "priority", "status", "created_at", "previous_ticket_id")
+CSV_FIELDS = ("id", "subject", "description", "priority", "status", "created_at", "previous_ticket_id")
 
 
 def customer_ticket(ticket: Mapping, messages: Iterable[Mapping] = ()) -> dict:
@@ -28,7 +28,7 @@ def customer_csv(tickets: Iterable[Mapping]) -> str:
     writer.writeheader()
     for ticket in tickets:
         # Neutralize spreadsheet formulas in user-controlled text fields.
-        row = {field: ticket[field] for field in CSV_FIELDS}
+        row = {field: ticket.get(field, "") for field in CSV_FIELDS}
         for key, value in row.items():
             if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")):
                 row[key] = "'" + value

@@ -103,7 +103,7 @@ def main():
             def write_user(i):
                 tick=time.monotonic()
                 try:
-                    r=requests.post(BASE+'/tickets',headers=headers,json={'subject':f'Hosted verification: release load {result["utc_started"]} #{i+1:02d}','customer_email':'hosted-verification@arvo.example','priority':'small','source':'agent'},timeout=30)
+                    r=requests.post(BASE+'/tickets',headers=headers,json={'body':'Test description', 'subject':f'Hosted verification: release load {result["utc_started"]} #{i+1:02d}','customer_email':'hosted-verification@arvo.example','priority':'small','source':'agent'},timeout=30)
                     return {'status':r.status_code,'id':r.json().get('id'),'seconds':round(time.monotonic()-tick,3)}
                 except requests.RequestException:return {'status':0,'id':None,'seconds':round(time.monotonic()-tick,3)}
             with ThreadPoolExecutor(max_workers=10) as pool:writes=list(pool.map(write_user,range(10)))

@@ -72,7 +72,7 @@ def test_browser_lifecycle_privacy_xss_csv_keyboard_and_responsive(browser,brows
     headers={'Authorization':'Bearer '+token}
     payload='<img src=x onerror="window.XSS_EXECUTED=true"> \u202e 👩🏽‍💻 e\u0301'
     def create(subject,priority='medium'):
-        r=page.request.post(base+'/tickets',headers=headers,data={'subject':subject,'customer_email':'browser@example.com','priority':priority})
+        r=page.request.post(base+'/tickets',headers=headers,data={'body':'Test description', 'subject':subject,'customer_email':'browser@example.com','priority':priority})
         assert r.status==201
         return r.json()
     late=create('Browser: late','urgent')
@@ -120,7 +120,7 @@ def test_browser_lifecycle_privacy_xss_csv_keyboard_and_responsive(browser,brows
     page.get_by_role('button',name='Reply to customer',exact=True).click()
     page.locator('#reply-body').fill(payload)
     page.get_by_role('button',name='Send reply',exact=True).click()
-    expect(page.locator('.message:not(.internal)')).to_have_count(1)
+    expect(page.locator('.message:not(.internal)')).to_have_count(2)
     assert not page.evaluate('Boolean(window.XSS_EXECUTED)')
     page.once('dialog',lambda dialog:dialog.dismiss())
     page.locator('#ticket-status').select_option('waiting_on_customer')
@@ -226,7 +226,7 @@ def test_two_browser_context_claim_conflict(browser,browser_stack):
     one,two=a.new_page(),b.new_page()
     token=signin(one,base)
     signin(two,base,'arun@arvo.example')
-    t=one.request.post(base+'/tickets',headers={'Authorization':'Bearer '+token},data={'subject':'Browser: competing claim','customer_email':'race@example.com'}).json()
+    t=one.request.post(base+'/tickets',headers={'Authorization':'Bearer '+token},data={'body':'Test description', 'subject':'Browser: competing claim','customer_email':'race@example.com'}).json()
     for page in (one,two):
         page.goto(base+f'/#ticket/{t["id"]}')
         expect(page.get_by_role('button',name='Take this ticket')).to_be_visible()
@@ -243,3 +243,30 @@ def test_two_browser_context_claim_conflict(browser,browser_stack):
     expect(one.locator('#ticket-status')).to_be_enabled()
     expect(one.locator('#ticket-priority')).to_be_enabled()
     a.close();b.close()
+
+
+def test_description_in_agent_and_customer_intake_is_inert(browser,browser_stack):
+    base, _, _ = browser_stack
+    context = browser.new_context()
+    page = context.new_page()
+    signin(page,base)
+    payload = '<img src=x onerror="window.XSS_EXECUTED=true"> Description details'
+    page.get_by_role('button',name='New ticket',exact=True).click()
+    page.get_by_label('Subject',exact=True).fill('Agent intake description')
+    page.get_by_label('Description',exact=True).fill(payload)
+    page.get_by_label('Customer email',exact=True).fill('intake@example.com')
+    page.get_by_role('button',name='Create ticket',exact=True).click()
+    expect(page.locator('.thread .message').first).to_contain_text(payload)
+    assert not page.evaluate('Boolean(window.XSS_EXECUTED)')
+    customer_context = browser.new_context()
+    customer = customer_context.new_page()
+    customer.goto(base+'/customer')
+    axe(customer,'customer-intake')
+    customer.get_by_label('Subject',exact=True).fill('Customer intake description')
+    customer.get_by_label('Email',exact=True).fill('intake@example.com')
+    customer.get_by_label('Description',exact=True).fill(payload)
+    customer.get_by_role('button',name='Send request',exact=True).click()
+    expect(customer.locator('.thread .message').first).to_contain_text(payload)
+    assert customer.url == base+'/customer'
+    assert not customer.evaluate('Boolean(window.XSS_EXECUTED)')
+    customer_context.close(); context.close()

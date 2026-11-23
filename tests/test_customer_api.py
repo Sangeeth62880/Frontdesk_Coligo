@@ -20,7 +20,7 @@ def test_customer_allowlist_views_and_csv(harness, seeded_ticket):
     assert client.get("/customer/tickets", headers=headers(seeded_ticket)).json()[0]["id"] == seeded_ticket["id"]
     exported = client.get("/export.csv", headers=headers(seeded_ticket))
     assert exported.status_code == 200
-    assert exported.text.splitlines()[0] == "id,subject,priority,status,created_at,previous_ticket_id"
+    assert exported.text.splitlines()[0] == "id,subject,description,priority,status,created_at,previous_ticket_id"
     assert "Printer offline" in exported.text
 
 
