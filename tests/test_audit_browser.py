@@ -90,6 +90,14 @@ def test_browser_lifecycle_privacy_xss_csv_keyboard_and_responsive(browser,brows
     page.get_by_label('Workspace menu').click()
     expect(page.locator('#ticket-list tr').first).to_have_attribute('data-ticket',str(late['id']))
     axe(page,'list')
+    page.locator('#status-filter').select_option('late')
+    expect(page.locator('#ticket-list .ticket-row')).to_have_count(2)
+    expect(page.locator('.late-targets').first).to_contain_text('late by')
+    expect(page.get_by_role('button',name='Download late report')).to_be_visible()
+    with page.expect_download() as report:
+        page.get_by_role('button',name='Download late report').click()
+    assert 'overshoot_working_minutes' in Path(report.value.path()).read_text()
+    page.locator('#status-filter').select_option('all')
     screens=Path('output/screens');screens.mkdir(parents=True,exist_ok=True)
     for width in (390,768,1280):
         page.set_viewport_size({'width':width,'height':900})

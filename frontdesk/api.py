@@ -33,7 +33,7 @@ from frontdesk.business_time import CalendarRangeError, local
 from frontdesk.events import log_event
 from frontdesk.http import RequestSafety
 from frontdesk.scheduler import Sweeper
-from frontdesk.serializers import customer_csv, customer_ticket
+from frontdesk.serializers import customer_csv, customer_ticket, late_csv
 
 
 class SafeInput(BaseModel):
@@ -326,7 +326,7 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
     def sla_view(db, ticket, context=None, instant=None):
         targets = service.sla(db, ticket, instant if instant is not None else now(db), context=context)
         return {**ticket, **{key: targets[key] for key in (
-            "first_reply_due_at", "first_reply_breached", "resolution_breached")}, "sla": targets}
+            "first_reply_due_at", "first_reply_breached", "resolution_breached")}, "sla": targets, "late_targets": service.late_targets(db,ticket,targets,instant if instant is not None else now(db),context=context)}
 
     def agent_view(db, ticket, actor):
         ticket = service.locked_ticket(db, ticket["id"])
@@ -347,6 +347,14 @@ def create_app(database_url=None, sweep_token=None, clock=None, sweep_interval=N
         for item in result:
             item.pop("customer_token", None)
         return sorted(result, key=lambda t: (not t["sla"]["is_late"], t["id"]))
+
+    @app.get("/tickets/export.csv", response_class=PlainTextResponse)
+    def export_late(db: DB, actor: Agent, late: bool = True):
+        if not late:
+            raise HTTPException(422, 'Use late=true for the late-ticket report')
+        rows = ticket_list(db,actor,'all')
+        names = {row['id']:row['name'] for row in db.execute('SELECT id,name FROM agents')}
+        return PlainTextResponse(late_csv([row for row in rows if row['sla']['is_late']],names),media_type='text/csv',headers={'Content-Disposition':'attachment; filename=frontdesk-late.csv','Cache-Control':'private, no-store'})
 
     @app.get("/tickets/{ticket_id}")
     def ticket_view(ticket_id: Annotated[int, ApiPath(ge=1, le=9223372036854775807)], db: DB, actor: Agent):

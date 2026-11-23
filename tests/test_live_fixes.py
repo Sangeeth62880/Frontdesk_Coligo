@@ -126,3 +126,74 @@ def test_customer_token_failures_are_uniform_and_valid_body_errors_stay_422(harn
     for body in ('','bad\x00body','x'*10001):
         response = c.post(f'/tickets/{ticket["id"]}/customer-reply',headers={'X-Customer-Token':ticket['customer_token']},json={'body':body})
         assert response.status_code == 422
+
+
+def test_late_export_retains_breach_target_across_priority_completion_and_reopen(harness, agent_headers):
+    import csv
+    import io
+    from datetime import datetime, timedelta
+
+    from frontdesk.business_time import Calendar
+    c, url, now = harness
+    ticket = c.post('/tickets',headers=agent_headers,json={'subject':'=SUM(1,2)','body':'Public description','customer_email':'late@example.com','priority':'urgent'}).json()
+    p = f'/tickets/{ticket["id"]}'
+    assert c.post(p+'/claim',headers=agent_headers).status_code == 200
+    assert c.post(p+'/notes',headers=agent_headers,json={'body':'NEVER_EXPORT_PRIVATE_NOTE'}).status_code == 201
+    due = datetime.fromisoformat(c.get(p,headers=agent_headers).json()['sla']['resolution_due_at'])
+    with psycopg.connect(url) as db:
+        calendar = Calendar(frozenset(row[0] for row in db.execute('SELECT day FROM holidays')))
+    now[0] = calendar.add(due,660)
+    assert c.get('/tickets/export.csv?late=true').status_code == 401
+    response = c.get('/tickets/export.csv?late=true',headers=agent_headers)
+    assert response.status_code == 200 and response.headers['cache-control'] == 'private, no-store'
+    assert all(secret not in response.text for secret in ('NEVER_EXPORT_PRIVATE_NOTE','customer_token',ticket['customer_token'],'Public description','late@example.com'))
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    resolution = next(row for row in rows if row['breached_target']=='resolution')
+    assert float(resolution['overshoot_working_minutes']) == 660
+    assert datetime.fromisoformat(resolution['due_time']) == due
+    assert resolution['assignee']=='Meera' and resolution['subject']=="'=SUM(1,2)"
+    assert {row['breached_target'] for row in rows} == {'first_reply','resolution'}
+    assert c.post(p+'/priority',headers=agent_headers,json={'priority':'small'}).status_code == 200
+    view = c.get(p,headers=agent_headers).json()
+    assert datetime.fromisoformat(view['sla']['resolution_due_at']) > now[0]
+    target = next(target for target in view['late_targets'] if target['target']=='resolution')
+    assert target['working_minutes'] == 660 and datetime.fromisoformat(target['due_at']) == due
+    assert c.post(p+'/status',headers=agent_headers,json={'status':'resolved','version':view['version']}).status_code == 200
+    now[0] += timedelta(days=1)
+    assert c.post(p+'/agent-reopen',headers=agent_headers).status_code == 200
+    targets = c.get(p,headers=agent_headers).json()['late_targets']
+    assert [(target['cycle_number'],target['working_minutes']) for target in targets if target['target']=='resolution'] == [(1,660)]
+
+
+def test_late_working_time_excludes_paused_time(harness, agent_headers):
+    from datetime import datetime
+
+    from frontdesk.business_time import Calendar
+    c, url, now = harness
+    ticket = c.post('/tickets',headers=agent_headers,json={'subject':'Late waiting','body':'Initial question','customer_email':'wait@example.com','priority':'urgent'}).json()
+    p = f'/tickets/{ticket["id"]}'
+    assert c.post(p+'/claim',headers=agent_headers).status_code == 200
+    view = c.get(p,headers=agent_headers).json()
+    due = datetime.fromisoformat(view['sla']['resolution_due_at'])
+    with psycopg.connect(url) as db:
+        calendar = Calendar(frozenset(row[0] for row in db.execute('SELECT day FROM holidays')))
+    now[0] = calendar.add(due,60)
+    assert c.post(p+'/status',headers=agent_headers,json={'status':'waiting_on_customer','body':'Please confirm the workspace','version':view['version']}).status_code == 200
+    now[0] = calendar.add(now[0],1080)
+    targets = c.get(p,headers=agent_headers).json()['late_targets']
+    assert next(target for target in targets if target['target']=='resolution')['working_minutes'] == 60
+
+
+def test_clean_seed_has_one_late_ticket_and_no_test_subjects(harness, agent_headers):
+    from datetime import timedelta
+
+    from psycopg.rows import dict_row
+
+    from scripts.seed_demo import seed_cases
+    c, url, now = harness
+    now[0] -= timedelta(days=7)
+    with psycopg.connect(url,row_factory=dict_row) as db:
+        assert len(seed_cases(db,now[0])) == 8
+    tickets = c.get('/tickets?assignee=all',headers=agent_headers).json()
+    assert sum(ticket['sla']['is_late'] for ticket in tickets) == 1
+    assert all('verification' not in ticket['subject'].lower() and '<' not in ticket['subject'] for ticket in tickets)

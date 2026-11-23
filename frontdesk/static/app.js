@@ -17,12 +17,13 @@ function relativeTime(value){
   if(seconds<86400)return `${Math.floor(seconds/3600)}h ago`;
   return `${Math.floor(seconds/86400)}d ago`;
 }
+function lateText(target){const label=target.target==='first_reply'?'First reply':'Resolution';if(target.working_minutes===null)return `${label} previously breached · duration unavailable`;let remaining=Math.ceil(target.working_minutes),days=Math.floor(remaining/540);remaining%=540;const hours=Math.floor(remaining/60),minutes=remaining%60,parts=[];if(days)parts.push(days+'d');if(hours)parts.push(hours+'h');if(minutes||!parts.length)parts.push(minutes+'m');return `${label} late by ${parts.join(' ')}${target.cycle_number?' (cycle '+target.cycle_number+')':''}`;}
 function dueText(ticket){
   const value=ticket.sla.resolution_due_at;
   if(!value)return '—';
   const clock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(value));
   const text=istDay(value)===istDay(Date.now())?`<span class="today">Today</span>, ${esc(clock)}`:esc(date(value));
-  return `<time datetime="${esc(value)}" title="${esc(fullDate(value))}">${text}</time>${ticket.sla.is_late?'<span class="late-label">Late</span>':''}`;
+  return `<time datetime="${esc(value)}" title="${esc(fullDate(value))}">${text}</time>${ticket.sla.is_late?'<span class="late-label">Late</span>':''}${(ticket.late_targets||[]).map(target=>`<span class="late-targets">${esc(lateText(target))}</span>`).join('')}`;
 }
 // Presentation order only: keep the API's SLA flags and deadlines authoritative.
 function ticketSortGroup(ticket){return ticket.sla.is_late?0:ticket.status==='open'?1:ticket.status==='waiting_on_customer'?2:3;}
@@ -51,9 +52,9 @@ async function request(path, {method='GET', body, customerToken, signal, idempot
   if(!response.ok){const error=new Error(typeof data.detail==='string'?data.detail:response.status===422?'Please check the form fields.':data.detail?.message || 'Request failed');error.status=response.status;error.detail=data.detail;throw error;}
   return data;
 }
-function visibleTickets(){const query=$('#search').value.trim().toLowerCase(),status=$('#status-filter').value;return state.tickets.filter(t=>(state.queue==='all'||state.queue==='me'&&t.assignee_id===state.agent||state.queue==='unassigned'&&t.assignee_id===null)&&(status==='all'||status==='active'&&['open','waiting_on_customer'].includes(t.status)||t.status===status)&&`${t.id} ${t.subject} ${t.customer_email}`.toLowerCase().includes(query)).sort(compareTickets);}
+function visibleTickets(){const query=$('#search').value.trim().toLowerCase(),status=$('#status-filter').value;return state.tickets.filter(t=>(state.queue==='all'||state.queue==='me'&&t.assignee_id===state.agent||state.queue==='unassigned'&&t.assignee_id===null)&&(status==='late'&&t.sla.is_late||status==='all'||status==='active'&&['open','waiting_on_customer'].includes(t.status)||t.status===status)&&`${t.id} ${t.subject} ${t.customer_email}`.toLowerCase().includes(query)).sort(compareTickets);}
 function renderList(){
-  const rows=visibleTickets();
+  const rows=visibleTickets();$('#late-export').hidden=$('#status-filter').value!=='late';
   $('#my-count').textContent=state.tickets.filter(t=>t.assignee_id===state.agent&&['open','waiting_on_customer'].includes(t.status)).length;
   $('#unassigned-count').textContent=state.tickets.filter(t=>t.assignee_id===null&&['open','waiting_on_customer'].includes(t.status)).length;
   $('#all-count').textContent=state.tickets.length;
@@ -154,3 +155,5 @@ document.addEventListener('keydown',e=>{
   e.preventDefault();let index=links.indexOf(document.activeElement);index=index<0?(e.key==='j'?0:links.length-1):Math.max(0,Math.min(links.length-1,index+(e.key==='j'?1:-1)));links[index].focus();
 });
 document.addEventListener('click',e=>document.querySelectorAll('.overflow[open]').forEach(menu=>{if(!menu.contains(e.target))menu.open=false;}));
+
+$('#late-export').addEventListener('click',async()=>{try{const response=await fetch('/tickets/export.csv?late=true',{headers:{Authorization:`Bearer ${state.token}`}});if(response.status===401)clearSession();if(!response.ok)throw new Error('Late export failed');const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='frontdesk-late.csv';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch(error){handleError(error);}});

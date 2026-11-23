@@ -41,7 +41,7 @@ def test_notes_invisible_in_data_metadata_headers_errors_and_logs(harness,agent_
     # Exercise every registered route with no agent credentials. Inventory equality
     # forces an explicit test decision when the API grows.
     expected={
-        ('POST','/auth/login'),('GET','/auth/me'),('POST','/auth/logout'),('GET','/health'),('GET','/agents'),('GET','/tickets'),('POST','/tickets'),
+        ('POST','/auth/login'),('GET','/auth/me'),('POST','/auth/logout'),('GET','/health'),('GET','/agents'),('GET','/tickets'),('GET','/tickets/export.csv'),('POST','/tickets'),
         ('POST','/customer/tickets'),('GET','/customer/tickets'),('GET','/customer/tickets/{ticket_id}'),
         ('GET','/export.csv'),('POST','/tickets/{ticket_id}/notes'),('POST','/tickets/{ticket_id}/claim'),
         ('GET','/tickets/{ticket_id}'),('GET','/tickets/{ticket_id}/events'),('GET','/tickets/{ticket_id}/customer-access'),

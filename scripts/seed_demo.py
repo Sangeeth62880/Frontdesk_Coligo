@@ -58,15 +58,15 @@ def seed_cases(db, instant, *, review=False):
     service.change_status(db,waiting,'waiting_on_customer',waiting_at+timedelta(minutes=10),'agent:2')
     service.add_note(db,waiting['id'],'Check the workspace mapping once the customer replies.',2,now=waiting_at+timedelta(minutes=20))
     friday = instant.date()
-    while friday.weekday()!=4 or not calendar.working(friday) or datetime.combine(friday,time(18,45),ZONE)>instant:
+    while friday.weekday()!=4 or not calendar.working(friday) or datetime.combine(friday,time(18,30),ZONE)>instant:
         friday -= timedelta(days=1)
-    evening = create('Add a second billing contact', 'We would like invoices sent to a second contact as well as the account owner.', 'friday','small',datetime.combine(friday,time(18,45),ZONE),None if review else 3)
+    evening = create('Add a second billing contact', 'We would like invoices sent to a second contact as well as the account owner.', 'friday','small',min(datetime.combine(friday,time(18,45),ZONE),instant),None if review else 3)
     resolved_at = working_ago(2640)
     near_at = calendar.start(resolved_at-timedelta(days=3))
     near = create('Monthly dashboard totals differ from the report', 'The revenue total on our dashboard differs from the exported monthly report for the same period.', 'reopen','medium',near_at,1)
     near = answer(near,'We corrected the reporting filter. Please compare the totals again.',near_at+timedelta(minutes=20))
     service.change_status(db,near,'resolved',resolved_at,'agent:1')
-    urgent = create('Checkout is unavailable for our customers', 'Customers cannot complete checkout and receive a service error when submitting payment.', 'urgent','urgent',instant-timedelta(minutes=30),2)
+    urgent = create('Checkout is unavailable for our customers', 'Customers cannot complete checkout and receive a service error when submitting payment.', 'urgent','urgent',instant,2)
     unassigned = create('How can we update the company address', 'Please explain how to update the company address shown on future invoices.', 'unassigned','small',instant-timedelta(minutes=5),None)
     tickets = [late,waiting,evening,near,urgent,unassigned]
     if not review:

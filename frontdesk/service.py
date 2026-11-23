@@ -45,7 +45,7 @@ def load_sla_context(db, tickets):
     pauses: dict[int, list[Pause]] = {}
     for row in db.execute("SELECT * FROM ticket_pauses WHERE ticket_id = ANY(%s) ORDER BY paused_at", (ids,)):
         pauses.setdefault(row["cycle_id"], []).append(Pause(row["paused_at"], row["resumed_at"]))
-    return {"calendar": calendar, "policies": policies, "latest": latest, "initial": initial, "pauses": pauses}
+    return {"calendar": calendar, "policies": policies, "latest": latest, "initial": initial, "pauses": pauses, "histories": histories}
 
 
 def sla(db, ticket, now, *, context=None):
@@ -74,20 +74,53 @@ def sla(db, ticket, now, *, context=None):
     reply_checked = min(value for value in (ticket["first_replied_at"], initial["ended_at"], now) if value is not None)
     reply_breached = bool(reply_due and reply_checked > reply_due)
     resolution_breached = bool(cycle["breached"] or checked_at > resolution_due)
-    if cycle["ended_at"] is None and cycle["breached"] != resolution_breached:
-        db.execute("UPDATE resolution_cycles SET breached = %s WHERE id = %s", (resolution_breached, cycle["id"]))
+    if cycle["ended_at"] is None and (cycle["breached"] != resolution_breached or (resolution_breached and cycle["breach_due_at"] is None and checked_at > resolution_due)):
+        db.execute("UPDATE resolution_cycles SET breached = %s, breach_due_at = COALESCE(breach_due_at, CASE WHEN %s THEN %s END) WHERE id = %s", (resolution_breached, checked_at > resolution_due, resolution_due, cycle["id"]))
     flags = {"first_reply_breached": ticket["first_reply_breached"] or reply_breached,
              "resolution_breached": ticket["resolution_breached"] or resolution_breached}
     if (ticket["first_reply_due_at"] != reply_due or
-            any(ticket[key] != value for key, value in flags.items())):
+            any(ticket[key] != value for key, value in flags.items()) or (reply_breached and ticket["first_reply_breach_due_at"] is None)):
         db.execute("""UPDATE tickets SET first_reply_breached=%s,
-            resolution_breached=%s, first_reply_due_at=%s WHERE id=%s""",
-            (flags["first_reply_breached"], flags["resolution_breached"], reply_due, ticket["id"]))
+            resolution_breached=%s, first_reply_due_at=%s, first_reply_breach_due_at=COALESCE(first_reply_breach_due_at,CASE WHEN %s THEN %s END) WHERE id=%s""",
+            (flags["first_reply_breached"], flags["resolution_breached"], reply_due, reply_breached, reply_due, ticket["id"]))
     return {"first_reply_due_at": reply_due, "resolution_due_at": resolution_due,
             "cycle_number": cycle["cycle_number"], "cycle_resolution_breached": resolution_breached, **flags,
             "breached_targets": [name for name in ("first_reply", "resolution") if flags[name + "_breached"]],
             "is_late": any(flags.values())}
 
+
+
+def late_targets(db, ticket, targets, now, *, context=None):
+    """Working-time overshoot against retained breach deadlines, per cycle."""
+    if not targets['is_late']:
+        return []
+    context = context or load_sla_context(db,[ticket])
+    calendar = context['calendar']
+    cycles = [cycle for cycle in context['histories'] if cycle['ticket_id']==ticket['id']]
+    result = []
+    def record(target, number, due, stop, pauses=()):
+        minutes = None
+        if due is not None and due <= stop:
+            minutes = calendar.minutes(due,stop)
+            for pause in pauses:
+                begin, end = max(due,pause.paused_at), min(stop,pause.resumed_at or now)
+                if begin < end:
+                    minutes -= calendar.minutes(begin,end)
+            minutes = round(max(0,minutes),6)
+        result.append({'target':target,'cycle_number':number,'due_at':due,'working_minutes':minutes})
+    if targets['first_reply_breached']:
+        initial = context['initial'][ticket['id']]
+        stop = min(value for value in (ticket['first_replied_at'],initial['ended_at'],now) if value is not None)
+        due = ticket['first_reply_breach_due_at'] or targets['first_reply_due_at']
+        record('first_reply',1,due,stop)
+    for cycle in cycles:
+        current = cycle['cycle_number']==targets['cycle_number']
+        if cycle['breached'] or (current and targets['cycle_resolution_breached']):
+            due = cycle['breach_due_at'] or cycle['resolution_due_at'] or (targets['resolution_due_at'] if current else None)
+            record('resolution',cycle['cycle_number'],due,min(now,cycle['ended_at'] or now),context['pauses'].get(cycle['id'],[]))
+    if targets['resolution_breached'] and not any(row['target']=='resolution' for row in result):
+        record('resolution',None,None,now)
+    return result
 
 
 def create_ticket(db, subject, customer_email, priority, now, actor,

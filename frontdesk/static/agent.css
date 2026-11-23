@@ -123,3 +123,7 @@ th,.message-header time,.event time,.deadline>span:first-child{font-size:13px}
 }
 
 .assignee-control{display:flex;flex-direction:column;gap:4px}.assignee-control .field-label{color:var(--muted)}.ticket-controls .claim-button{align-self:center}
+
+.late-targets{display:block;white-space:normal;color:var(--red);font-size:12px;line-height:1.5;overflow-wrap:anywhere}
+#list-page .list-toolbar{height:auto;min-height:40px;flex-wrap:wrap}
+#list-page .list-toolbar>span{white-space:nowrap}
