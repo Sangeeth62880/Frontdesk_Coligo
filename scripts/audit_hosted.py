@@ -59,6 +59,7 @@ def main():
                 browser_page.get_by_role('button',name='Sign in',exact=True).click()
                 browser_page.locator('#login-dialog').wait_for(state='hidden')
                 browser_page.locator('[data-queue=all]').click()
+                browser_page.locator('#status-filter').select_option('all')
                 browser_page.locator('#ticket-list .ticket-row').first.wait_for()
                 source=Path('node_modules/axe-core/axe.min.js').read_text()
                 browser_page.evaluate(source)

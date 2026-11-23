@@ -197,3 +197,13 @@ def test_clean_seed_has_one_late_ticket_and_no_test_subjects(harness, agent_head
     tickets = c.get('/tickets?assignee=all',headers=agent_headers).json()
     assert sum(ticket['sla']['is_late'] for ticket in tickets) == 1
     assert all('verification' not in ticket['subject'].lower() and '<' not in ticket['subject'] for ticket in tickets)
+
+
+def test_browser_refresh_bounds_event_reads_without_losing_any_activity():
+    import json
+    import subprocess
+    result=subprocess.run(['node','tests/ui_refresh.cjs'],capture_output=True,text=True,check=True)
+    proof=json.loads(result.stdout)
+    assert proof['tickets']==proof['event_requests']==64
+    assert proof['peak_event_reads']<=4
+    assert proof['activity']=='latest actual event timestamp'

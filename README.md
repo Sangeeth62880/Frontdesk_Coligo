@@ -65,7 +65,7 @@ Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open opera
 - Free-tier cold starts remain. In-process sweeps require an awake service; the GitHub schedule uses only FRONTDESK_BASE_URL and FRONTDESK_SWEEP_TOKEN. Both secrets are configured; workflow_dispatch run [45097076317](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45097076317) completed the sweep step successfully (not skipped).
 - No password reset, password-change UI, MFA, SSO or session listing.
 - No authenticated customer portal, token delivery, capability expiry or rotation UI; only a capability-based customer intake/conversation page. Customer-selected priority still needs an urgency-verification policy.
-- No pagination or database connection pooling.
+- No pagination or database connection pooling. The hosted 52-ticket capacity run recorded read p95 7.207s and one 503/300 reads; later release measurements must be read alongside this failure.
 - No audit hash chain.
 - Holiday seeds end December 25, 2027 and need extending before later dates can be calculated.
 - Chromium lifecycle, accessibility, responsive screenshots and native CSV download passed locally for the live-test fixes and against the preceding hosted release; the new hosted run is pending; natural 12-hour expiry and live-account lockout remain local deterministic coverage. See [release evidence](docs/RELEASE.md).

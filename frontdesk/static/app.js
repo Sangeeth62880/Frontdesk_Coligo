@@ -94,10 +94,14 @@ window.addEventListener('hashchange',route);
 async function loadDetail(){if(!state.selected)return;const version=++state.version,id=state.selected;const [detail,events]=await Promise.all([request(`/tickets/${id}`),request(`/tickets/${id}/events`)]);if(version!==state.version||id!==state.selected)return;if(detail.assignee_id===state.agent){const access=await request(`/tickets/${id}/customer-access`);if(version!==state.version||id!==state.selected)return;detail.customer_token=access.customer_token;}state.detail=detail;state.events=events;renderDetail();}
 async function refresh(){if(refreshing){refreshAgain=true;return;}refreshing=true;try{const tickets=await request('/tickets?assignee=all');
   // Use existing event reads; do not substitute ticket creation/update timestamps.
-  const activity=await Promise.all(tickets.map(async ticket=>{
-    const events=await request(`/tickets/${ticket.id}/events`);
-    const latest=events.reduce((last,event)=>!last||new Date(event.created_at)>new Date(last)?event.created_at:last,null);
-    return [ticket.id,latest];
+  // Bound connection pressure while retaining event-derived activity for every row.
+  const activity=new Array(tickets.length);let next=0;
+  await Promise.all(Array.from({length:Math.min(4,tickets.length)},async()=>{
+    while(next<tickets.length){
+      const index=next++,ticket=tickets[index],events=await request(`/tickets/${ticket.id}/events`);
+      const latest=events.reduce((last,event)=>!last||new Date(event.created_at)>new Date(last)?event.created_at:last,null);
+      activity[index]=[ticket.id,latest];
+    }
   }));
   state.tickets=tickets;state.lastActivity=new Map(activity);renderList();if(state.selected)await loadDetail();else if(location.hash.startsWith('#ticket/'))route();}catch(error){handleError(error);}finally{refreshing=false;if(refreshAgain){refreshAgain=false;await refresh();}}}
 function showLogin(){
