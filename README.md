@@ -7,7 +7,7 @@ Support tickets with working-time SLAs, private notes and an immutable audit tra
 - Live: [frontdesk-spfe.onrender.com](https://frontdesk-spfe.onrender.com)
 - Repository: [Sangeeth62880/Frontdesk_Coligo](https://github.com/Sangeeth62880/Frontdesk_Coligo)
 - Demo logins: `meera@arvo.example`, `arun@arvo.example`, `divya@arvo.example`; the demo password is supplied with the submission.
-- Demo mode (`FRONTDESK_SEED_DEMO=true`) seeds synthetic tickets and these three accounts; only demo mode shows the password hint, and repeat seeds preserve existing passwords.
+- Demo mode (`FRONTDESK_SEED_DEMO=true`) seeds synthetic tickets and these three accounts; only demo mode with `FRONTDESK_DEMO_HINT=true` shows the password hint, and repeat seeds preserve existing passwords.
 
 ## Run locally
 
