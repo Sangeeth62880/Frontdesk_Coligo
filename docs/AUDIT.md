@@ -137,3 +137,20 @@ Published code still needs release/retest. No claim is made that all hosted bloc
 ## Release follow-up — 23 November 2026
 
 See [RELEASE.md](RELEASE.md) for the explicitly authorized release. Agent list/detail now always omit customer_token; the assignee-only customer-access endpoint supports customer actions. HSTS, successful sweep heartbeat logging and fail-closed internal runtime-role/trigger verification were added for hosted verification. The only change to DECISIONS.md is the user's permitted single reassignment line. Earlier unshipped/hosted-failure observations above remain historical evidence, not the final release status.
+
+## Live-site fixes — ordered verification, 23 November 2026
+
+The subsequent user request supersedes the earlier one-line-only documentation limit: existing DECISIONS.md content remains byte-for-byte intact, with append-only clarifications. Steps 1–5 passed their full suites before the Late report was implemented. No tests were removed or weakened; existing fixtures now explicitly claim tickets before owner-only actions and supply the required description.
+
+| Step | Full suite | Local evidence |
+|---|---|---|
+| 1 — resolve/priority ownership, no rejected mutation/event | 229 passed | output/live-fixes/step1-rerun.txt |
+| 2 — transactional public resolution, idempotent retry | 231 passed | output/live-fixes/step2.txt |
+| 3 — required public customer description, clock/privacy/XSS checks | 244 passed | output/live-fixes/step3-rerun.txt |
+| 4 — coherent seed timelines, narrow owner seed timestamp exception, immutable events | 247 passed | output/live-fixes/step4-rerun.txt |
+| 5 — inline waiting, exhaustive event labels, uniform customer-token 401 | 249 passed | output/live-fixes/step5-rerun.txt |
+| 6 — Late targets, working-time overshoot and private CSV | 252 passed in 149.80s | output/live-fixes/step6.txt |
+
+Every final step run above has zero skips. Earlier failed attempts remain as diagnostics. Step 6 initially found real mobile overflow; the agent stylesheet and wrapping toolbar were fixed, retaining the responsive assertions. Ruff, mypy and JavaScript syntax checks pass. The new tests cover owner and non-owner paths, unassigned triage, retry event counts, customer visibility, first reply and clock independence, every seed timeline, owner/runtime timestamp behavior, trigger immutability, CSV formulas/privacy and historical breach retention through priority changes and reopen.
+
+Both required GitHub Actions secret names are present (metadata checked without values): FRONTDESK_BASE_URL and FRONTDESK_SWEEP_TOKEN. Workflow dispatch and a non-skipped sweep remain to be verified. Release CI, Docker build, deployment, hosted load/browser checks, the final schema reset and password rotation are pending; this local evidence does not establish those outcomes. No Render cron service is planned. The hosted SQL allowlist remains closed; runtime startup verification provides internal privilege/trigger evidence. Natural 12-hour expiry, live lockout, cold-start latency and one-week uptime remain unverified on the hosted service.

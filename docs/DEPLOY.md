@@ -14,7 +14,7 @@ The built-in sweep runs immediately on application startup and every 60 seconds 
 
 ## Local configuration and provisioning
 
-`FRONTDESK_SEED_DEMO=true` creates four representative synthetic tickets once and provisions Meera, Arun and Divya with the required `FRONTDESK_DEMO_PASSWORD` (there is no code default). Open `http://127.0.0.1:8000` and sign in with `meera@arvo.example`, `arun@arvo.example` or `divya@arvo.example` and that password. A muted hint appears only in demo mode. All nine agents have `firstname@arvo.example` addresses; the other six have no password until provisioned. Startup migrates, seeds using the administrator connection, optionally provisions a restricted runtime role, then serves requests with that role. Repeat seeds preserve existing passwords.
+`FRONTDESK_SEED_DEMO=true` creates eight representative synthetic tickets once and provisions Meera, Arun and Divya with the required `FRONTDESK_DEMO_PASSWORD` (there is no code default). Open `http://127.0.0.1:8000` and sign in with `meera@arvo.example`, `arun@arvo.example` or `divya@arvo.example` and that password. A muted hint appears only in demo mode. All nine agents have `firstname@arvo.example` addresses; the other six have no password until provisioned. Startup migrates, seeds using the administrator connection, optionally provisions a restricted runtime role, then serves requests with that role. Repeat seeds preserve existing passwords.
 
 For a non-demo installation, set `FRONTDESK_SEED_DEMO=false` and provision each agent with the administrator database connection:
 

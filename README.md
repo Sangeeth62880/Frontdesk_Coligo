@@ -35,18 +35,22 @@ Buildless HTML/CSS/JavaScript served from FastAPI and PostgreSQL, with plain SQL
 - SLA targets in working minutes: urgent first reply 120; medium reply/resolution 270/1620; small reply/resolution 540/2700.
 - Urgent resolution is due at 18:30 on the effective start day.
 - Waiting pauses resolution only; a public assignee question starts the pause, and customer replies resume it.
-- Priority changes recompute deadlines from the original applicable start, retaining pauses and recorded breaches.
+- Priority changes recompute deadlines from the original applicable start, retaining pauses and recorded breaches. Restarting at the change time was rejected because it discards elapsed customer wait and permits deadline extension through repeated changes.
 - A ticket is late if either first-reply or resolution target is breached; breach history remains recorded.
-- Claims use an atomic conditional UPDATE; only the assignee can post public replies.
-- Reopen within 2700 working minutes is inclusive and starts a new resolution cycle; later or closed-ticket requests create a linked ticket.
-- Auto-close requires an uninterrupted customer wait of at least 2700 working minutes and writes one system closure event.
+- Claims use an atomic conditional UPDATE; only the current assignee can reply, resolve or wait. Claim an unassigned ticket before resolving it. Any agent may re-triage priority while unassigned; once claimed, only its assignee may change priority.
+- “About one week” means five working days: 2700 working minutes for both reopen and auto-close. Reopen through that inclusive boundary deliberately starts a fresh resolution cycle, retaining prior cycles and breaches; later or closed-ticket requests create a linked ticket.
+- Only the system closes tickets. Auto-close requires an uninterrupted customer wait of at least 2700 working minutes and writes one system closure event.
+- Customers choose initial priority, a known gap; agents can re-triage under the ownership rules.
+- Creation requires a Description stored as the first public customer message; it never counts as first reply or changes SLA clocks.
+- Resolution optionally includes a public message in the API and requires Message to customer in the inline UI; retries are idempotent and the first such agent message satisfies first reply.
+- The Late filter identifies breached targets and working-time overshoot; its agent-only CSV excludes note text and capabilities, neutralizes formulas and is private/no-store.
 - Private notes live separately from public messages and never appear in customer responses, CSV or event bodies.
-- Audit events are append-only: database triggers reject UPDATE, DELETE and TRUNCATE, and assign server timestamps.
+- Audit events are append-only: database triggers reject UPDATE, DELETE and TRUNCATE, and assign server timestamps. Only the table owner with an explicit transaction-local seed setting may supply historical INSERT times; an owner could always bypass triggers.
 - Per-agent email/password login uses salted scrypt hashes, hashed 12-hour bearer sessions, logout revocation and database-backed throttling.
 
 Priority changes retain elapsed time because the customer has already waited. Restarting at the change time would hide lateness and allow the clock to be gamed; that alternative was rejected. Customer capabilities are absent from every agent list/detail response. Customer actions fetch their capability through a separate current-assignee-only endpoint. Only the current assignee can transfer ownership, preventing reassignment from bypassing capability isolation. An agent who creates a ticket receives its initial capability; capabilities already shared cannot be recalled without rotation.
 
-Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open operational checks: [Audit](docs/AUDIT.md), [requirement traceability](docs/TRACEABILITY.md). The local audit fixes have not yet been published or deployed.
+Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open operational checks: [Audit](docs/AUDIT.md), [requirement traceability](docs/TRACEABILITY.md). The earlier audit release is hosted; the subsequent live-test fixes await their release and final clean demo reset.
 
 ## Incidents
 
@@ -58,13 +62,13 @@ Full detail: [Decisions](docs/DECISIONS.md). Final audit evidence and open opera
 
 ## What I did not finish
 
-- Free-tier cold starts remain; sweeps depend on the awake service or the GitHub schedule, whose secrets still need configuring.
+- Free-tier cold starts remain. In-process sweeps require an awake service; the GitHub schedule uses only FRONTDESK_BASE_URL and FRONTDESK_SWEEP_TOKEN. Both secret names are configured; actual execution must be verified by a non-skipped sweep step.
 - No password reset, password-change UI, MFA, SSO or session listing.
-- No authenticated customer portal or token delivery; only a capability-based customer conversation page.
+- No authenticated customer portal, token delivery, capability expiry or rotation UI; only a capability-based customer intake/conversation page. Customer-selected priority still needs an urgency-verification policy.
 - No pagination or database connection pooling.
 - No audit hash chain.
 - Holiday seeds end December 25, 2027 and need extending before later dates can be calculated.
-- Chromium lifecycle, accessibility, responsive screenshots and native CSV download passed locally and against the hosted release; natural 12-hour expiry and live-account lockout remain local deterministic coverage. See [release evidence](docs/RELEASE.md).
+- Chromium lifecycle, accessibility, responsive screenshots and native CSV download passed locally for the live-test fixes and against the preceding hosted release; the new hosted run is pending; natural 12-hour expiry and live-account lockout remain local deterministic coverage. See [release evidence](docs/RELEASE.md).
 - One-week uptime has not yet been observed.
 
 ## Documentation
