@@ -258,6 +258,12 @@ def test_restricted_runtime_can_authenticate_but_cannot_edit_audit(harness):
         for statement in ['UPDATE events SET actor=\'forged\'', 'DELETE FROM events', 'TRUNCATE events', 'UPDATE agents SET password_hash=NULL']:
             with psycopg.connect(runtime_url) as db, pytest.raises(psycopg.errors.InsufficientPrivilege):
                 db.execute(statement)
+        with psycopg.connect(runtime_url) as db:
+            db.execute("SELECT set_config('frontdesk.seeding','on',true)")
+            before = db.execute('SELECT clock_timestamp()').fetchone()[0]
+            row = db.execute("INSERT INTO events(ticket_id,actor,event_type,created_at) VALUES (%s,'system','created','2000-01-01') RETURNING created_at", (ticket.json()['id'],)).fetchone()
+            after = db.execute('SELECT clock_timestamp()').fetchone()[0]
+            assert row[0].year != 2000 and before <= row[0] <= after
     finally:
         with psycopg.connect(url, autocommit=True) as db:
             if db.execute('SELECT 1 FROM pg_roles WHERE rolname=%s', (role,)).fetchone():

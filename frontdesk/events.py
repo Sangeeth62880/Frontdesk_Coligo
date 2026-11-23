@@ -20,7 +20,7 @@ PAYLOAD_FIELDS = {
 }
 
 
-def log_event(db, ticket_id, actor, event_type, before=None, after=None):
+def log_event(db, ticket_id, actor, event_type, before=None, after=None, *, at=None):
     allowed = PAYLOAD_FIELDS[event_type]
     def payload(value):
         if value is None:
@@ -29,6 +29,6 @@ def log_event(db, ticket_id, actor, event_type, before=None, after=None):
             raise ValueError(f"Unexpected audit metadata for {event_type}")
         return Jsonb(json.loads(json.dumps(value, default=lambda item: item.isoformat())))
     db.execute(
-        "INSERT INTO events(ticket_id, actor, event_type, before_value, after_value) VALUES (%s, %s, %s, %s, %s)",
-        (ticket_id, actor, event_type, payload(before), payload(after)),
+        "INSERT INTO events(ticket_id, actor, event_type, before_value, after_value, created_at) VALUES (%s, %s, %s, %s, %s, COALESCE(%s,clock_timestamp()))",
+        (ticket_id, actor, event_type, payload(before), payload(after), at),
     )

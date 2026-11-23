@@ -95,9 +95,9 @@ def create_ticket(db, subject, customer_email, priority, now, actor,
     calendar, _ = calendar_and_policy(db, priority)
     start = calendar.start(now)
     if customer_token is None:
-        row = db.execute("INSERT INTO tickets(subject, customer_email, priority, start_at, previous_ticket_id) VALUES (%s,%s,%s,%s,%s) RETURNING *", (subject, customer_email, priority, start, previous_ticket_id)).fetchone()
+        row = db.execute("INSERT INTO tickets(subject, customer_email, priority, start_at, previous_ticket_id, created_at) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *", (subject, customer_email, priority, start, previous_ticket_id, now)).fetchone()
     else:
-        row = db.execute("INSERT INTO tickets(subject, customer_email, priority, start_at, previous_ticket_id, customer_token) VALUES (%s,%s,%s,%s,%s,%s) RETURNING *", (subject, customer_email, priority, start, previous_ticket_id, customer_token)).fetchone()
+        row = db.execute("INSERT INTO tickets(subject, customer_email, priority, start_at, previous_ticket_id, customer_token, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *", (subject, customer_email, priority, start, previous_ticket_id, customer_token, now)).fetchone()
     db.execute("INSERT INTO resolution_cycles(ticket_id, cycle_number, opened_at, start_at) VALUES (%s,1,%s,%s)", (row["id"], now, start))
     # Existing internal callers (including reopen) retain their intake behavior.
     source = source or ("agent" if actor.startswith("agent:") else "customer")
@@ -105,16 +105,16 @@ def create_ticket(db, subject, customer_email, priority, now, actor,
         row = db.execute("UPDATE tickets SET first_reply_required = false WHERE id = %s RETURNING *", (row["id"],)).fetchone()
     description = db.execute("INSERT INTO public_messages(ticket_id,author_type,body,created_at) VALUES (%s,'customer',%s,%s) RETURNING id", (row['id'],body,row['created_at'])).fetchone() if body is not None else None
     targets = sla(db, row, now)
-    log_event(db, row["id"], actor, "created", after={"message_id": description["id"] if description else None, "source": source, "priority": priority, "cycle_number": 1, "previous_ticket_id": previous_ticket_id, "resolution_due_at": targets["resolution_due_at"]})
+    log_event(db, row["id"], actor, "created", after={"message_id": description["id"] if description else None, "source": source, "priority": priority, "cycle_number": 1, "previous_ticket_id": previous_ticket_id, "resolution_due_at": targets["resolution_due_at"]}, at=now)
     return row
 
 
-def add_note(db, ticket_id, body, agent_id):
+def add_note(db, ticket_id, body, agent_id, *, now=None):
     ticket = locked_ticket(db, ticket_id)
     if ticket["status"] == "closed":
         raise HTTPException(409, "Closed tickets cannot be edited")
-    note = db.execute("INSERT INTO internal_notes(ticket_id, agent_id, body) VALUES (%s,%s,%s) RETURNING id", (ticket_id, agent_id, body)).fetchone()
-    log_event(db, ticket_id, f"agent:{agent_id}", "internal_note_added", after={"note_id": note["id"]})
+    note = db.execute("INSERT INTO internal_notes(ticket_id, agent_id, body, created_at) VALUES (%s,%s,%s,COALESCE(%s,clock_timestamp())) RETURNING id", (ticket_id, agent_id, body, now)).fetchone()
+    log_event(db, ticket_id, f"agent:{agent_id}", "internal_note_added", after={"note_id": note["id"]}, at=now)
     return {"id": note["id"], "visibility": "internal"}
 
 
@@ -122,7 +122,7 @@ def resume(db, ticket, now, actor):
     cycle = cycle_for(db, ticket["id"])
     pause = db.execute("UPDATE ticket_pauses SET resumed_at = %s WHERE ticket_id = %s AND cycle_id = %s AND resumed_at IS NULL RETURNING id", (now, ticket["id"], cycle["id"])).fetchone()
     if pause:
-        log_event(db, ticket["id"], actor, "resumed", after={"pause_id": pause["id"], "cycle_number": cycle["cycle_number"]})
+        log_event(db, ticket["id"], actor, "resumed", after={"pause_id": pause["id"], "cycle_number": cycle["cycle_number"]}, at=now)
 
 
 def change_status(db, ticket, status, now, actor):
@@ -135,7 +135,7 @@ def change_status(db, ticket, status, now, actor):
         resume(db, ticket, now, actor)
     if status == "waiting_on_customer":
         pause = db.execute("INSERT INTO ticket_pauses(ticket_id, cycle_id, paused_at) VALUES (%s,%s,%s) RETURNING id", (ticket["id"], cycle["id"], now)).fetchone()
-        log_event(db, ticket["id"], actor, "paused", after={"pause_id": pause["id"], "cycle_number": cycle["cycle_number"]})
+        log_event(db, ticket["id"], actor, "paused", after={"pause_id": pause["id"], "cycle_number": cycle["cycle_number"]}, at=now)
     targets = sla(db, ticket, now)
     if status == "resolved":
         db.execute("UPDATE resolution_cycles SET ended_at = %s, resolution_due_at = %s, breached = %s WHERE id = %s", (now, targets["resolution_due_at"], targets["cycle_resolution_breached"], cycle["id"]))
@@ -143,7 +143,7 @@ def change_status(db, ticket, status, now, actor):
     after = {"status": status, "cycle_number": cycle["cycle_number"]}
     if status == "resolved":
         after.update(resolution_due_at=targets["resolution_due_at"], breached=targets["cycle_resolution_breached"])
-    log_event(db, ticket["id"], actor, "status_changed", before={"status": old}, after=after)
+    log_event(db, ticket["id"], actor, "status_changed", before={"status": old}, after=after, at=now)
     return updated
 
 
@@ -153,11 +153,11 @@ def public_message(db, ticket, body, now, actor, agent_id=None):
     if agent_id is not None and ticket["assignee_id"] != agent_id:
         raise HTTPException(409, "Claim this ticket before replying; only its assignee can post a public agent reply")
     sla(db, ticket, now)
-    row = db.execute("INSERT INTO public_messages(ticket_id, author_type, agent_id, body) VALUES (%s,%s,%s,%s) RETURNING id", (ticket["id"], "agent" if agent_id is not None else "customer", agent_id, body)).fetchone()
+    row = db.execute("INSERT INTO public_messages(ticket_id, author_type, agent_id, body, created_at) VALUES (%s,%s,%s,%s,%s) RETURNING id", (ticket["id"], "agent" if agent_id is not None else "customer", agent_id, body, now)).fetchone()
     if agent_id is not None:
         # Database predicate ensures even simultaneous agent replies satisfy once.
         db.execute("UPDATE tickets SET first_replied_at = %s WHERE id = %s AND first_replied_at IS NULL", (now, ticket["id"]))
-    log_event(db, ticket["id"], actor, "public_reply", after={"message_id": row["id"], "first_replied_at": now if agent_id is not None and ticket["first_replied_at"] is None else ticket["first_replied_at"]})
+    log_event(db, ticket["id"], actor, "public_reply", after={"message_id": row["id"], "first_replied_at": now if agent_id is not None and ticket["first_replied_at"] is None else ticket["first_replied_at"]}, at=now)
     if agent_id is None and ticket["status"] == "waiting_on_customer":
         change_status(db, ticket, "open", now, actor)
     return {"id": row["id"], "visibility": "public"}
@@ -173,7 +173,7 @@ def change_priority(db, ticket, priority, now, actor):
     after = sla(db, updated, now)
     def snapshot(priority, values):
         return {"priority": priority, "cycle_number": values["cycle_number"], "first_reply_due_at": values["first_reply_due_at"], "resolution_due_at": values["resolution_due_at"]}
-    log_event(db, ticket["id"], actor, "priority_changed", snapshot(ticket["priority"], before), snapshot(priority, after))
+    log_event(db, ticket["id"], actor, "priority_changed", snapshot(ticket["priority"], before), snapshot(priority, after), at=now)
     return updated
 
 
@@ -195,7 +195,7 @@ def auto_close(db, now):
         resume(db, ticket, now, "system")
         db.execute("UPDATE resolution_cycles SET ended_at = %s, resolution_due_at = %s, breached = %s WHERE id = %s", (now, targets["resolution_due_at"], targets["cycle_resolution_breached"], cycle["id"]))
         db.execute("UPDATE tickets SET status = 'closed', closed_at = %s WHERE id = %s", (now, ticket["id"]))
-        log_event(db, ticket["id"], "system", "auto_closed", before={"status": "waiting_on_customer"}, after={"status": "closed", "cycle_number": cycle["cycle_number"], "resolution_due_at": targets["resolution_due_at"], "breached": targets["cycle_resolution_breached"]})
+        log_event(db, ticket["id"], "system", "auto_closed", before={"status": "waiting_on_customer"}, after={"status": "closed", "cycle_number": cycle["cycle_number"], "resolution_due_at": targets["resolution_due_at"], "breached": targets["cycle_resolution_breached"]}, at=now)
         closed.append(ticket["id"])
     return {"closed_count": len(closed), "ticket_ids": closed}
 
@@ -212,7 +212,7 @@ def reopen(db, ticket, now, actor="customer"):
     if plan is None or plan.action == "linked_new_ticket":
         new = create_ticket(db, ticket["subject"], ticket["customer_email"], ticket["priority"], now,
                             actor, ticket["id"], ticket["customer_token"])
-        log_event(db, new["id"], actor, "linked_ticket_created", after={"previous_ticket_id": ticket["id"]})
+        log_event(db, new["id"], actor, "linked_ticket_created", after={"previous_ticket_id": ticket["id"]}, at=now)
         return "linked_new_ticket", new
     previous = cycle_for(db, ticket["id"])
     if previous["ended_at"] is None:
@@ -222,5 +222,5 @@ def reopen(db, ticket, now, actor="customer"):
     updated = db.execute("UPDATE tickets SET status = 'open', resolved_at = NULL, closed_at = NULL WHERE id = %s RETURNING *", (ticket["id"],)).fetchone()
     log_event(db, ticket["id"], actor, "reopened",
               before={"status": ticket["status"], "cycle_number": previous["cycle_number"], "resolution_due_at": previous["resolution_due_at"]},
-              after={"status": "open", "cycle_number": number, "start_at": plan.cycle_start, "resolution_due_at": plan.resolution_due})
+              after={"status": "open", "cycle_number": number, "start_at": plan.cycle_start, "resolution_due_at": plan.resolution_due}, at=now)
     return "reopen", updated

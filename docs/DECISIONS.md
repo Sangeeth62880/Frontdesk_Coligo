@@ -27,3 +27,5 @@
 
 [README](../README.md) · [Testing](TESTING.md)
 - Reassignment requires the current assignee.
+
+- Seed-only event timestamp exception: supplied times are honored only for the migration/table owner with frontdesk.seeding enabled; the runtime role always receives server time. A database owner could always bypass triggers.

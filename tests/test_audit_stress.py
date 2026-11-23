@@ -1,7 +1,7 @@
 """Seeded parallel histories replay their business state from immutable events."""
 import random
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psycopg
 from fastapi.testclient import TestClient
@@ -92,9 +92,9 @@ def test_six_deterministic_review_cases_preserve_immutable_history(harness):
     from scripts.seed_review_demo import seed_review
     _c,url,now=harness
     with psycopg.connect(url,row_factory=dict_row) as db:
-        first=seed_review(db,now[0])
+        first=seed_review(db,now[0]-timedelta(days=7))
         events=db.execute('SELECT * FROM events ORDER BY id').fetchall()
-        assert len(first)==6 and seed_review(db,now[0])==first
+        assert len(first)==6 and seed_review(db,now[0]-timedelta(days=7))==first
         assert db.execute('SELECT * FROM events ORDER BY id').fetchall()==events
         rows=db.execute('SELECT * FROM tickets ORDER BY id').fetchall()
         assert {'urgent','medium','small'}=={r['priority'] for r in rows}
