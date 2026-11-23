@@ -63,3 +63,7 @@ The initial verified application was published on `main` in [Sangeeth62880/Front
 The current deployed application commit is `c20a8c4`. The dedicated Take this ticket button was verified on the live site, and repeated provisioning was verified under a non-superuser PostgreSQL owner. [Current CI](https://github.com/Sangeeth62880/Frontdesk_Coligo/actions/runs/45034482014) passed the full suite and Docker image build. The optional external sweep still requires the repository secrets described above; free-tier cold starts and one-week availability remain operational limitations.
 
 [README](../README.md) · [Testing](TESTING.md)
+
+## External auto-close schedule
+
+The existing GitHub Actions sweep workflow needs exactly two repository Actions secrets: `FRONTDESK_BASE_URL=https://frontdesk-spfe.onrender.com` and `FRONTDESK_SWEEP_TOKEN` equal to the current service environment value in Render → frontdesk-spfe → Environment. Never put the token in workflow source or logs. Run the workflow manually after configuration and inspect **Close expired customer waits** for success rather than relying on a green job with that step skipped. Dispatch run 45097076317 verified successful execution. No Render cron service is needed.
